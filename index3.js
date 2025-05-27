@@ -39,6 +39,7 @@ let gameState = {
   shieldedPlayer: null,
   shieldedPlayerRound: null,
   killedPlayer: null,
+  clown: null,
   votes: new Map(),
   skipVotes: 0,
   totalVotes: 0,
@@ -46,6 +47,7 @@ let gameState = {
   doctorActionTaken: false,
   doctorPhaseEnded: false,
   detectorUsedAbility: false,
+  hasPresident: false,
   bodyguardUsedAbility: false,
   bodyguardPhaseEnded: false,
   gameMessage: null,
@@ -115,7 +117,7 @@ client.on("messageCreate", async (message) => {
       fs.readFile(
         "gameState.json",
         "utf8",
-        function readFileCallback(err, data) {
+        async function readFileCallback(err, data) {
           if (err) {
             console.log(err);
           } else {
@@ -129,9 +131,15 @@ client.on("messageCreate", async (message) => {
             gameState.playerRoles.set(gameState.bodyguard, "bodyguard");
             gameState.playerRoles.set(gameState.mayor, "mayor");
             gameState.playerRoles.set(gameState.president, "president");
+            gameState.playerRoles.set(gameState.clown, "clown");
             gameState.mafiaActions = new Map();
             gameState.votes = new Map();
             gameState.gameChannel = message.channel;
+            if (gameState.mafiaThread != null) {
+              gameState.mafiaThread = await client.channels.fetch(
+                gameState.mafiaThread.id
+              );
+            }
             switch (gameState.currentPhase) {
               case "mafia":
                 startMafiaPhase(message.channel);
@@ -431,7 +439,7 @@ async function assignRoles(channel) {
     gameState.allPlayers = [...gameState.players];
 
     const shuffledPlayers = gameState.players.sort(() => Math.random() - 0.5);
-
+    gameState.hasPresident = shuffledPlayers.length >= 7;
     if (shuffledPlayers.length < 6) {
       await channel.send(
         "❌ **Not enough players to assign all roles. You need at least 6 players.**"
@@ -456,11 +464,15 @@ async function assignRoles(channel) {
     gameState.detector = shuffledPlayers[mafiaCount + 1];
     gameState.bodyguard = shuffledPlayers[mafiaCount + 2];
     gameState.mayor = shuffledPlayers[mafiaCount + 3];
-    gameState.president = shuffledPlayers[mafiaCount + 4];
-
-    shuffledPlayers.slice(mafiaCount + 5).forEach((player) => {
-      gameState.playerRoles.set(player, "citizen");
-    });
+    gameState.clown = shuffledPlayers[mafiaCount + 4];
+    if (gameState.hasPresident) {
+      gameState.president = shuffledPlayers[mafiaCount + 5];
+    }
+    shuffledPlayers
+      .slice(mafiaCount + (gameState.hasPresident ? 6 : 5))
+      .forEach((player) => {
+        gameState.playerRoles.set(player, "citizen");
+      });
 
     for (const mafia of gameState.mafias) {
       gameState.playerRoles.set(mafia, "mafia");
@@ -469,8 +481,10 @@ async function assignRoles(channel) {
     gameState.playerRoles.set(gameState.detector, "detective");
     gameState.playerRoles.set(gameState.bodyguard, "bodyguard");
     gameState.playerRoles.set(gameState.mayor, "mayor");
-    gameState.playerRoles.set(gameState.president, "president");
-
+    gameState.playerRoles.set(gameState.clown, "clown");
+    if (gameState.hasPresident) {
+      gameState.playerRoles.set(gameState.president, "president");
+    }
     for (const playerId of gameState.players) {
       const role = gameState.playerRoles.get(playerId);
       console.log(playerId, role.toUpperCase());
@@ -478,6 +492,11 @@ async function assignRoles(channel) {
         playerId,
         `🎭 **Your role is:** **${role.toUpperCase()}**.`
       );
+      if (playerId === gameState.clown){
+        sendPlayerMessage(playerId,
+          `As clown, you have a unique win condition. You win if and only if the town votes to kill you. If you make it to the end of the game alive, or get killed by the mafia; you lose. `
+        )
+      }
     }
 
     if (gameState.mafias.length >= 2) {
@@ -538,9 +557,11 @@ async function assignRoles(channel) {
         { name: "👑 **Number of Mayors**", value: `1`, inline: true },
         {
           name: "👨‍🌾 **Number of Citizens**",
-          value: `${gameState.players.length - mafiaCount - 4}`,
+          value: `${gameState.players.length - mafiaCount - gameState.hasPresident?6:5}`,
           inline: true,
         },
+        { name: "🤡 **Number of Clowns**", value: 1, inline: true},
+        { name: "🥇 **Number of Presidents**", value: gameState.hasPresident?1:0, inline:true}
         {
           name: "All Players",
           value:
@@ -591,6 +612,8 @@ function resetGame() {
     currentPhase: "mafia",
     doctor: null,
     detector: null,
+    clown:null,
+    hasPresident:false,
     bodyguard: null,
     mayor: null,
     gameActive: false,
@@ -601,6 +624,7 @@ function resetGame() {
     votes: new Map(),
     skipVotes: 0,
     totalVotes: 0,
+    hasPresident: false,
     mafiaActions: new Map(),
     doctorActionTaken: false,
     doctorPhaseEnded: false,
@@ -740,6 +764,7 @@ async function startMafiaPhase(channel) {
 
     const rows = createButtonRows(buttons);
     if (gameState.mafiaThread != null) {
+      console.log(JSON.stringify(gameState.mafiaThread));
       const message = await gameState.mafiaThread.send({
         content:
           "💀 **You have been chosen as mafia. You must choose a player to kill. If you choose different players, the victim will be chosen randomly.**",
@@ -831,9 +856,12 @@ async function handleMafiaKill(interaction) {
       }
 
       gameState.mafiaActions.set(mafiaId, playerId);
-
-      await interaction.update({
-        content: `✅ **You have chosen to kill <@${playerId}>. Wait for the other mafia to choose.**`,
+      var targetObj = gameState.gameChannel.guild.members.cache.get(playerId);
+      if (targetObj == null) {
+        targetObj = await client.users.fetch(playerId);
+      }
+      await interaction.reply({
+        content: `✅ **You have chosen to kill <${targetObj.displayName}>. Wait for the other mafia to choose.**`,
         components: [],
       });
 
@@ -889,17 +917,21 @@ async function resolveMafiaActions(channel) {
         `🗡️ **The mafia chose different targets. The victim will be chosen randomly.**`
       );
     }
-
     gameState.killedPlayer = targetToKill;
+
+    var targetObj = channel.guild.members.cache.get(targetToKill);
+    if (targetObj == null) {
+      targetObj = await client.users.fetch(targetToKill);
+    }
     if (gameState.mafiaThread != null) {
       await gameState.mafiaThread.send({
-        content: `🗡️ **The final victim is <@${targetToKill}>.**`,
+        content: `🗡️ **The final victim is <${targetObj.displayName}>.**`,
         ephemeral: true,
       });
     }
     if (gameState.mafias.lenght === 1) {
       sendPlayerMessage(gameState.mafias[0], {
-        content: `🗡️ **The final victim is <@${targetToKill}>.**`,
+        content: `🗡️ **The final victim is <${targetObj.displayName}>.**`,
         ephemeral: true,
       });
     }
@@ -1412,6 +1444,20 @@ async function resolveNightPhase(channel) {
       if (killedPlayer === gameState.president) {
         gameState.president = null;
       }
+      if (killedPlayer === gameState.clown){
+        gameState.clown = null;
+        const embed = new EmbedBuilder()
+        .setTitle("📊 **The Clown was killed at night **")
+        .setColor("#00ff00")
+        .addFields(
+          { name: "As a result, they have lost and are to be forever shunned in clown circles.", value: "Shame on them.", inline: true },
+        )
+        .setTimestamp();
+
+      gameState.gameChannel.send({ embeds: [embed] });
+
+
+      }
       await channel.send(
         `💀 **<@${killedPlayer}> was killed tonight. Their role was: ${role.toUpperCase()}**`
       );
@@ -1446,7 +1492,7 @@ function checkWinConditions(channel) {
       (player) => gameState.playerRoles.get(player) === "mafia"
     ).length;
 
-    const citizenCount = gameState.players.length - mafiaCount;
+    const citizenCount = gameState.players.filter((player) => player != gameState.clown).length - mafiaCount;
 
     let winner = null;
 
@@ -1488,7 +1534,17 @@ function checkWinConditions(channel) {
         .setTimestamp();
 
       channel.send({ embeds: [embed] });
+      if (gameState.clown != null && gameState.players.includes(gameState.clown)){
+        const embed = new EmbedBuilder()
+        .setTitle("🤡 **The Clown survived the entire game**")
+        .setColor("#00ff00")
+        .addFields(
+          { name: "As a result, they have lost and are to be forever shunned in clown circles.", value: "Shame on them.", inline: true },
+        )
+        .setTimestamp();
 
+      gameState.gameChannel.send({ embeds: [embed] });
+      }
       resetGame();
       return true;
     }
@@ -1532,13 +1588,18 @@ async function startVotePhase(channel) {
       var target = alivePlayers[i];
       var targetObj = channel.guild?.members?.cache.get(target);
       if (targetObj == null || targetObj == undefined) {
-        console.log(target);
         targetObj = await client.users.fetch(target);
+        if (targetObj == null) {
+          targetObj = await guild.members.fetch(target);
+        }
+        console.log(JSON.stringify(targetObj));
       }
       buttons.push(
         new ButtonBuilder()
           .setCustomId(`vote_${target}`)
-          .setLabel(`${targetObj?.displayName || "Unknown"}`)
+          .setLabel(
+            `${targetObj?.displayName || targetObj?.globalName || "Unknown"}`
+          )
           .setStyle(ButtonStyle.Secondary)
       );
     }
@@ -1569,12 +1630,17 @@ async function startVotePhase(channel) {
         new ActionRowBuilder().addComponents(buttons.slice(i, i + 5))
       );
     }
-
-    const controlButtonsRow = new ActionRowBuilder().addComponents(
+    const controlButtonsRow= null;
+    if (gameState.hasPresident){
+     controlButtonsRow = new ActionRowBuilder().addComponents(
       skipButton,
       presidentButton
     );
-
+  }else{
+    controlButtonsRow = new ActionRowBuilder().addComponents(
+      skipButton
+    );
+  }
     await disableButtonsInChannel(channel);
 
     await gameState.gameChannel.send({
@@ -1614,73 +1680,82 @@ async function handleVote(interaction) {
       return;
     }
 
-    if (!gameState.votes.has(interaction.user.id)) {
-      let voteWeight = 1;
+    let voteWeight = 1;
 
-      if (interaction.user.id === gameState.mayor) {
-        voteWeight = 2;
-        await interaction.reply({
-          content: `✅ **Your vote has been registered with double weight as mayor <@${interaction.user.id}>.**`,
-          ephemeral: true,
-        });
-      } else {
-        await interaction.reply({
-          content: "✅ **Your vote has been registered.**",
-          ephemeral: true,
-        });
-      }
-
-      if (!gameState.voteCounts) {
-        gameState.voteCounts = new Map();
-      }
-
-      gameState.votes.set(interaction.user.id, {
-        target: playerId,
-        weight: voteWeight,
+    if (interaction.user.id === gameState.mayor) {
+      voteWeight = 2;
+      await interaction.reply({
+        content: `✅ **Your vote has been registered with double weight as mayor <@${interaction.user.id}>.**`,
+        ephemeral: true,
       });
-      gameState.totalVotes += 1;
-
-      let voteDisplayCounts = new Map();
-      for (const vote of gameState.votes.values()) {
-        if (vote.target !== "skip") {
-          voteDisplayCounts.set(
-            vote.target,
-            (voteDisplayCounts.get(vote.target) || 0) + vote.weight
-          );
-        }
-      }
-
-      const updatedComponents = interaction.message.components.map((row) =>
-        new ActionRowBuilder().addComponents(
-          row.components.map((button) => {
-            const targetPlayerId = button.customId.split("_")[1];
-            if (button.customId === "skip_vote") return button;
-            if (button.customId === "president_ability") return button;
-
-            const voteCount = voteDisplayCounts.get(targetPlayerId) || 0;
-
-            return ButtonBuilder.from(button).setLabel(
-              `${
-                interaction.guild.members.cache.get(targetPlayerId)
-                  ?.displayName || "Unknown"
-              } (${voteCount})`
-            );
-          })
-        )
-      );
-
-      await interaction.message.edit({
-        content: interaction.message.content,
-        components: updatedComponents,
-      });
-
-      await checkIfAllVotedOrTimeout(interaction.channel);
     } else {
       await interaction.reply({
-        content: "❌ **You have already voted.**",
+        content: "✅ **Your vote has been registered.**",
         ephemeral: true,
       });
     }
+
+    if (!gameState.voteCounts) {
+      gameState.voteCounts = new Map();
+    }
+
+    var currentVote = gameState.votes.get(interaction.user.id);
+    if (currentVote == undefined) {
+      gameState.totalVotes += 1;
+    } else if (currentVote.target == "skip") {
+      gameState.skipVotes -= 1;
+    }
+    gameState.votes.set(interaction.user.id, {
+      target: playerId,
+      weight: voteWeight,
+    });
+
+    let voteDisplayCounts = new Map();
+    for (const vote of gameState.votes.values()) {
+      if (vote.target !== "skip") {
+        voteDisplayCounts.set(
+          vote.target,
+          (voteDisplayCounts.get(vote.target) || 0) + vote.weight
+        );
+      }
+    }
+
+    const updatedComponents = await Promise.all(
+      interaction.message.components.map(async (row) =>
+        new ActionRowBuilder().addComponents(
+          await Promise.all(
+            row.components.map(async (button) => {
+              const targetPlayerId = button.customId.split("_")[1];
+              if (button.customId === "skip_vote") return button;
+              if (gameState.hasPresident && button.customId === "president_ability") return button;
+
+              const voteCount = voteDisplayCounts.get(targetPlayerId) || 0;
+              var target = targetPlayerId;
+              var targetObj =
+                gameState.gameChannel.guild?.members?.cache.get(target);
+              if (targetObj == null || targetObj == undefined) {
+                targetObj = await client.users.fetch(target);
+                if (targetObj == null) {
+                  targetObj = await guild.members.fetch(target);
+                }
+              }
+              return ButtonBuilder.from(button).setLabel(
+                `${
+                  targetObj?.displayName || targetObj?.globalName || "Unknown"
+                } (${voteCount})`
+              );
+            })
+          )
+        )
+      )
+    );
+
+    await interaction.message.edit({
+      content: interaction.message.content,
+      components: updatedComponents,
+    });
+
+    await checkIfAllVotedOrTimeout(interaction.channel);
   } catch (error) {
     console.error("Error in handleVote:", error);
     if (!interaction.replied) {
@@ -1703,54 +1778,47 @@ async function handleSkipVote(interaction) {
       return;
     }
 
-    if (!gameState.votes?.has(interaction.user.id)) {
-      let voteWeight = 1;
+    let voteWeight = 1;
 
-      if (interaction.user.id === gameState.mayor) {
-        voteWeight = 2;
-        await interaction.reply({
-          content: `✅ **Your skip vote has been registered with double weight as mayor <@${interaction.user.id}>.**`,
-          ephemeral: true,
-        });
-      } else {
-        await interaction.reply({
-          content: "✅ **Your skip vote has been registered.**",
-          ephemeral: true,
-        });
-      }
-
-      gameState.votes.set(interaction.user.id, {
-        target: "skip",
-        weight: voteWeight,
+    if (interaction.user.id === gameState.mayor) {
+      voteWeight = 2;
+      await interaction.reply({
+        content: `✅ **Your skip vote has been registered with double weight as mayor <@${interaction.user.id}>.**`,
+        ephemeral: true,
       });
-      gameState.skipVotes += voteWeight;
-      gameState.totalVotes += 1;
-
-      const updatedComponents = interaction.message.components.map((row) =>
-        new ActionRowBuilder().addComponents(
-          row.components.map((button) => {
-            if (button.customId === "skip_vote") {
-              return ButtonBuilder.from(button).setLabel(
-                `Skip Vote (${gameState.skipVotes})`
-              );
-            }
-            return button;
-          })
-        )
-      );
-
-      await interaction.message.edit({
-        content: interaction.message.content,
-        components: updatedComponents,
-      });
-
-      await checkIfAllVotedOrTimeout(interaction.channel);
     } else {
       await interaction.reply({
-        content: "❌ **You have already voted.**",
+        content: "✅ **Your skip vote has been registered.**",
         ephemeral: true,
       });
     }
+
+    gameState.votes.set(interaction.user.id, {
+      target: "skip",
+      weight: voteWeight,
+    });
+    gameState.skipVotes += voteWeight;
+    gameState.totalVotes += 1;
+
+    const updatedComponents = interaction.message.components.map((row) =>
+      new ActionRowBuilder().addComponents(
+        row.components.map((button) => {
+          if (button.customId === "skip_vote") {
+            return ButtonBuilder.from(button).setLabel(
+              `Skip Vote (${gameState.skipVotes})`
+            );
+          }
+          return button;
+        })
+      )
+    );
+
+    await interaction.message.edit({
+      content: interaction.message.content,
+      components: updatedComponents,
+    });
+
+    await checkIfAllVotedOrTimeout(interaction.channel);
   } catch (error) {
     console.error("Error in handleSkipVote:", error);
     if (!interaction.replied) {
@@ -1799,14 +1867,19 @@ async function handlePresidentAbility(interaction) {
     const buttons = [];
     for (var i in alivePlayers) {
       var target = alivePlayers[i];
-      var targetObj = channel.guild.members.cache.get(target);
-      if (targetObj == null) {
+      var targetObj = gameState.gameChannel.guild?.members?.cache.get(target);
+      if (targetObj == null || targetObj == undefined) {
         targetObj = await client.users.fetch(target);
+        if (targetObj == null) {
+          targetObj = await guild.members.fetch(target);
+        }
       }
       buttons.push(
         new ButtonBuilder()
           .setCustomId(`president_select_${target}`)
-          .setLabel(`${targetObj?.displayName || "Unknown"}`)
+          .setLabel(
+            `${targetObj?.displayName || targetObj?.globalName || "Unknown"}`
+          )
           .setStyle(ButtonStyle.Danger)
       );
     }
@@ -1908,7 +1981,7 @@ async function handlePresidentSelection(interaction) {
 async function checkIfAllVotedOrTimeout(channel) {
   try {
     const remainingPlayers = gameState.players.length;
-    if (gameState.totalVotes >= remainingPlayers && gameState.votePhaseActive) {
+    if (gameState.votes.size >= remainingPlayers && gameState.votePhaseActive) {
       gameState.votePhaseActive = false;
       if (gameState.voteTimeout) {
         clearTimeout(gameState.voteTimeout);
@@ -1976,6 +2049,17 @@ async function tallyVotes(channel) {
       }
       if (expelledPlayer === gameState.president) {
         gameState.president = null;
+      }
+      if (expelledPlayer === gameState.clown){
+        const embed = new EmbedBuilder()
+        .setTitle("🤡🤡🤡🤡🤡🤡🤡🤡🤡 **THE TOWN FELL FOR THE CLOWN **🤡🤡🤡🤡🤡🤡🤡🤡🤡🤡")
+        .setColor("#00ff00")
+        .addFields(
+          { name: "You should probably feel a little ashamed, you all just got clowned on", value: "The clown is the game's first winner! Bravo!.", inline: true },
+        )
+        .setTimestamp();
+
+      gameState.gameChannel.send({ embeds: [embed] });
       }
 
       await channel.send(
