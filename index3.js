@@ -132,6 +132,11 @@ client.on("messageCreate", async (message) => {
             gameState.playerRoles.set(gameState.mayor, "mayor");
             gameState.playerRoles.set(gameState.president, "president");
             gameState.playerRoles.set(gameState.clown, "clown");
+            for (const player of gameState.players) {
+              if (!gameState.playerRoles.has(player)) {
+                gameState.playerRoles.set(player, "citizen");
+              }
+            }
             gameState.mafiaActions = new Map();
             gameState.votes = new Map();
             gameState.gameChannel = message.channel;
@@ -492,10 +497,11 @@ async function assignRoles(channel) {
         playerId,
         `🎭 **Your role is:** **${role.toUpperCase()}**.`
       );
-      if (playerId === gameState.clown){
-        sendPlayerMessage(playerId,
+      if (playerId === gameState.clown) {
+        sendPlayerMessage(
+          playerId,
           `As clown, you have a unique win condition. You win if and only if the town votes to kill you. If you make it to the end of the game alive, or get killed by the mafia; you lose. `
-        )
+        );
       }
     }
 
@@ -557,11 +563,19 @@ async function assignRoles(channel) {
         { name: "👑 **Number of Mayors**", value: `1`, inline: true },
         {
           name: "👨‍🌾 **Number of Citizens**",
-          value: `${gameState.players.length - mafiaCount - gameState.hasPresident?6:5}`,
+          value: `${
+            gameState.players.length -
+            mafiaCount -
+            (gameState.hasPresident ? 6 : 5)
+          }`,
           inline: true,
         },
-        { name: "🤡 **Number of Clowns**", value: 1, inline: true},
-        { name: "🥇 **Number of Presidents**", value: gameState.hasPresident?1:0, inline:true}
+        { name: "🤡 **Number of Clowns**", value: `1`, inline: true },
+        {
+          name: "🥇 **Number of Presidents**",
+          value: `${gameState.hasPresident ? 1 : 0}`,
+          inline: true,
+        },
         {
           name: "All Players",
           value:
@@ -612,8 +626,8 @@ function resetGame() {
     currentPhase: "mafia",
     doctor: null,
     detector: null,
-    clown:null,
-    hasPresident:false,
+    clown: null,
+    hasPresident: false,
     bodyguard: null,
     mayor: null,
     gameActive: false,
@@ -750,7 +764,7 @@ async function startMafiaPhase(channel) {
     const buttons = [];
     for (var i in availableTargets) {
       var target = availableTargets[i];
-      var targetObj = channel.guild.members.cache.get(target);
+      var targetObj = channel?.guild?.members.cache.get(target);
       if (targetObj == null) {
         targetObj = await client.users.fetch(target);
       }
@@ -856,7 +870,7 @@ async function handleMafiaKill(interaction) {
       }
 
       gameState.mafiaActions.set(mafiaId, playerId);
-      var targetObj = gameState.gameChannel.guild.members.cache.get(playerId);
+      var targetObj = gameState.gameChannel?.guild?.members.cache.get(playerId);
       if (targetObj == null) {
         targetObj = await client.users.fetch(playerId);
       }
@@ -919,7 +933,7 @@ async function resolveMafiaActions(channel) {
     }
     gameState.killedPlayer = targetToKill;
 
-    var targetObj = channel.guild.members.cache.get(targetToKill);
+    var targetObj = channel?.guild?.members.cache.get(targetToKill);
     if (targetObj == null) {
       targetObj = await client.users.fetch(targetToKill);
     }
@@ -1027,7 +1041,7 @@ async function startDoctorPhase(channel) {
     const buttons = [];
     for (var i in alivePlayers) {
       var target = alivePlayers[i];
-      var targetObj = channel.guild.members.cache.get(target);
+      var targetObj = channel?.guild?.members.cache.get(target);
       if (targetObj == null) {
         targetObj = await client.users.fetch(target);
       }
@@ -1113,7 +1127,7 @@ async function startBodyguardPhase(channel) {
     const buttons = [];
     for (var i in alivePlayers) {
       var target = alivePlayers[i];
-      var targetObj = channel.guild.members.cache.get(target);
+      var targetObj = channel?.guild?.members.cache.get(target);
       if (targetObj == null) {
         targetObj = await client.users.fetch(target);
       }
@@ -1276,7 +1290,7 @@ async function startDetectorPhase(channel) {
     const buttons = [];
     for (var i in alivePlayers) {
       var target = alivePlayers[i];
-      var targetObj = channel.guild.members.cache.get(target);
+      var targetObj = channel?.guild?.members.cache.get(target);
       if (targetObj == null) {
         targetObj = await client.users.fetch(target);
       }
@@ -1423,46 +1437,54 @@ async function resolveNightPhase(channel) {
       gameState.players = gameState.players.filter(
         (player) => player !== killedPlayer
       );
-      const role = gameState.playerRoles.get(killedPlayer);
-      if (role === "mafia") {
+      var role = gameState.playerRoles.get(killedPlayer);
+      role = "citizen";
+      if (gameState.mafias.includes(killedPlayer)) {
+        role = "mafia";
         gameState.mafias = gameState.mafias.filter(
           (mafia) => mafia !== killedPlayer
         );
       }
       if (killedPlayer === gameState.doctor) {
         gameState.doctor = null;
+        role = "doctor";
       }
       if (killedPlayer === gameState.detector) {
         gameState.detector = null;
+        role = "detective";
       }
       if (killedPlayer === gameState.bodyguard) {
         gameState.bodyguard = null;
+        role = "bodyguard";
       }
       if (killedPlayer === gameState.mayor) {
         gameState.mayor = null;
+        role = "mayor";
       }
       if (killedPlayer === gameState.president) {
         gameState.president = null;
+        role = "president";
       }
-      if (killedPlayer === gameState.clown){
+      if (killedPlayer === gameState.clown) {
         gameState.clown = null;
+        role = "clown";
         const embed = new EmbedBuilder()
-        .setTitle("📊 **The Clown was killed at night **")
-        .setColor("#00ff00")
-        .addFields(
-          { name: "As a result, they have lost and are to be forever shunned in clown circles.", value: "Shame on them.", inline: true },
-        )
-        .setTimestamp();
+          .setTitle("📊 **The Clown was killed at night **")
+          .setColor("#00ff00")
+          .addFields({
+            name: "As a result, they have lost and are to be forever shunned in clown circles.",
+            value: "Shame on them.",
+            inline: true,
+          })
+          .setTimestamp();
 
-      gameState.gameChannel.send({ embeds: [embed] });
-
-
+        gameState.gameChannel.send({ embeds: [embed] });
       }
-      await channel.send(
-        `💀 **<@${killedPlayer}> was killed tonight. Their role was: ${role.toUpperCase()}**`
+      await gameState.gameChannel.send(
+        `💀 **<@${killedPlayer}> was killed tonight. :rip:**`
       );
     } else if (killedPlayer && killedPlayer === protectedPlayer) {
-      await channel.send(
+      await gameState.gameChannel.send(
         `💉 **The killing failed because <@${protectedPlayer}> was protected by the doctor.**`
       );
     }
@@ -1492,7 +1514,9 @@ function checkWinConditions(channel) {
       (player) => gameState.playerRoles.get(player) === "mafia"
     ).length;
 
-    const citizenCount = gameState.players.filter((player) => player != gameState.clown).length - mafiaCount;
+    const citizenCount =
+      gameState.players.filter((player) => player != gameState.clown).length -
+      mafiaCount;
 
     let winner = null;
 
@@ -1534,16 +1558,21 @@ function checkWinConditions(channel) {
         .setTimestamp();
 
       channel.send({ embeds: [embed] });
-      if (gameState.clown != null && gameState.players.includes(gameState.clown)){
+      if (
+        gameState.clown != null &&
+        gameState.players.includes(gameState.clown)
+      ) {
         const embed = new EmbedBuilder()
-        .setTitle("🤡 **The Clown survived the entire game**")
-        .setColor("#00ff00")
-        .addFields(
-          { name: "As a result, they have lost and are to be forever shunned in clown circles.", value: "Shame on them.", inline: true },
-        )
-        .setTimestamp();
+          .setTitle("🤡 **The Clown survived the entire game**")
+          .setColor("#00ff00")
+          .addFields({
+            name: "As a result, they have lost and are to be forever shunned in clown circles.",
+            value: "Shame on them.",
+            inline: true,
+          })
+          .setTimestamp();
 
-      gameState.gameChannel.send({ embeds: [embed] });
+        gameState.gameChannel.send({ embeds: [embed] });
       }
       resetGame();
       return true;
@@ -1586,11 +1615,11 @@ async function startVotePhase(channel) {
     const buttons = [];
     for (var i in alivePlayers) {
       var target = alivePlayers[i];
-      var targetObj = channel.guild?.members?.cache.get(target);
+      var targetObj = channel?.guild?.members?.cache.get(target);
       if (targetObj == null || targetObj == undefined) {
         targetObj = await client.users.fetch(target);
         if (targetObj == null) {
-          targetObj = await guild.members.fetch(target);
+          targetObj = await guild?.members.fetch(target);
         }
         console.log(JSON.stringify(targetObj));
       }
@@ -1630,17 +1659,15 @@ async function startVotePhase(channel) {
         new ActionRowBuilder().addComponents(buttons.slice(i, i + 5))
       );
     }
-    const controlButtonsRow= null;
-    if (gameState.hasPresident){
-     controlButtonsRow = new ActionRowBuilder().addComponents(
-      skipButton,
-      presidentButton
-    );
-  }else{
-    controlButtonsRow = new ActionRowBuilder().addComponents(
-      skipButton
-    );
-  }
+    var controlButtonsRow = null;
+    if (gameState.hasPresident) {
+      controlButtonsRow = new ActionRowBuilder().addComponents(
+        skipButton,
+        presidentButton
+      );
+    } else {
+      controlButtonsRow = new ActionRowBuilder().addComponents(skipButton);
+    }
     await disableButtonsInChannel(channel);
 
     await gameState.gameChannel.send({
@@ -1703,7 +1730,7 @@ async function handleVote(interaction) {
     if (currentVote == undefined) {
       gameState.totalVotes += 1;
     } else if (currentVote.target == "skip") {
-      gameState.skipVotes -= 1;
+      gameState.skipVotes = gameState.skipVotes - voteWeight;
     }
     gameState.votes.set(interaction.user.id, {
       target: playerId,
@@ -1726,17 +1753,25 @@ async function handleVote(interaction) {
           await Promise.all(
             row.components.map(async (button) => {
               const targetPlayerId = button.customId.split("_")[1];
-              if (button.customId === "skip_vote") return button;
-              if (gameState.hasPresident && button.customId === "president_ability") return button;
+              if (button.customId === "skip_vote") {
+                return ButtonBuilder.from(button).setLabel(
+                  `Skip Vote (${gameState.skipVotes})`
+                );
+              }
+              if (
+                gameState.hasPresident &&
+                button.customId === "president_ability"
+              )
+                return button;
 
               const voteCount = voteDisplayCounts.get(targetPlayerId) || 0;
               var target = targetPlayerId;
               var targetObj =
-                gameState.gameChannel.guild?.members?.cache.get(target);
+                gameState.gameChannel?.guild?.members?.cache.get(target);
               if (targetObj == null || targetObj == undefined) {
                 targetObj = await client.users.fetch(target);
                 if (targetObj == null) {
-                  targetObj = await guild.members.fetch(target);
+                  targetObj = await guild?.members.fetch(target);
                 }
               }
               return ButtonBuilder.from(button).setLabel(
@@ -1797,19 +1832,57 @@ async function handleSkipVote(interaction) {
       target: "skip",
       weight: voteWeight,
     });
-    gameState.skipVotes += voteWeight;
+    gameState.skipVotes = 0;
     gameState.totalVotes += 1;
 
-    const updatedComponents = interaction.message.components.map((row) =>
-      new ActionRowBuilder().addComponents(
-        row.components.map((button) => {
-          if (button.customId === "skip_vote") {
-            return ButtonBuilder.from(button).setLabel(
-              `Skip Vote (${gameState.skipVotes})`
-            );
-          }
-          return button;
-        })
+    for (var [key, value] of gameState.votes) {
+      if (value.target == "skip")
+        gameState.skipVotes += gameState.mayor == key ? 2 : 1;
+    }
+    let voteDisplayCounts = new Map();
+    for (const vote of gameState.votes.values()) {
+      if (vote.target !== "skip") {
+        voteDisplayCounts.set(
+          vote.target,
+          (voteDisplayCounts.get(vote.target) || 0) + vote.weight
+        );
+      }
+    }
+    const updatedComponents = await Promise.all(
+      interaction.message.components.map(async (row) =>
+        new ActionRowBuilder().addComponents(
+          await Promise.all(
+            row.components.map(async (button) => {
+              const targetPlayerId = button.customId.split("_")[1];
+              if (button.customId === "skip_vote") {
+                return ButtonBuilder.from(button).setLabel(
+                  `Skip Vote (${gameState.skipVotes})`
+                );
+              }
+              if (
+                gameState.hasPresident &&
+                button.customId === "president_ability"
+              )
+                return button;
+
+              const voteCount = voteDisplayCounts.get(targetPlayerId) || 0;
+              var target = targetPlayerId;
+              var targetObj =
+                gameState.gameChannel?.guild?.members?.cache.get(target);
+              if (targetObj == null || targetObj == undefined) {
+                targetObj = await client.users.fetch(target);
+                if (targetObj == null) {
+                  targetObj = await guild?.members.fetch(target);
+                }
+              }
+              return ButtonBuilder.from(button).setLabel(
+                `${
+                  targetObj?.displayName || targetObj?.globalName || "Unknown"
+                } (${voteCount})`
+              );
+            })
+          )
+        )
       )
     );
 
@@ -1867,11 +1940,11 @@ async function handlePresidentAbility(interaction) {
     const buttons = [];
     for (var i in alivePlayers) {
       var target = alivePlayers[i];
-      var targetObj = gameState.gameChannel.guild?.members?.cache.get(target);
+      var targetObj = gameState.gameChannel?.guild?.members?.cache.get(target);
       if (targetObj == null || targetObj == undefined) {
         targetObj = await client.users.fetch(target);
         if (targetObj == null) {
-          targetObj = await guild.members.fetch(target);
+          targetObj = await guild?.members.fetch(target);
         }
       }
       buttons.push(
@@ -2028,9 +2101,13 @@ async function tallyVotes(channel) {
       gameState.players = gameState.players.filter(
         (player) => player !== expelledPlayer
       );
-
+      var alignmentNotification =
+        "They also were a completely innocent member of the town, oops!";
       const role = gameState.playerRoles.get(expelledPlayer);
       if (role === "mafia") {
+        alignmentNotification =
+          "They were in-fact an evil mafia and the town is a safer place now.";
+
         gameState.mafias = gameState.mafias.filter(
           (mafia) => mafia !== expelledPlayer
         );
@@ -2050,20 +2127,44 @@ async function tallyVotes(channel) {
       if (expelledPlayer === gameState.president) {
         gameState.president = null;
       }
-      if (expelledPlayer === gameState.clown){
-        const embed = new EmbedBuilder()
-        .setTitle("🤡🤡🤡🤡🤡🤡🤡🤡🤡 **THE TOWN FELL FOR THE CLOWN **🤡🤡🤡🤡🤡🤡🤡🤡🤡🤡")
-        .setColor("#00ff00")
-        .addFields(
-          { name: "You should probably feel a little ashamed, you all just got clowned on", value: "The clown is the game's first winner! Bravo!.", inline: true },
-        )
-        .setTimestamp();
+      if (expelledPlayer === gameState.clown) {
+        alignmentNotification = "They were the clown.";
 
-      gameState.gameChannel.send({ embeds: [embed] });
+        const embed = new EmbedBuilder()
+          .setTitle(
+            "🤡🤡🤡🤡🤡🤡🤡🤡🤡 **THE TOWN FELL FOR THE CLOWN **🤡🤡🤡🤡🤡🤡🤡🤡🤡🤡"
+          )
+          .setColor("#00ff00")
+          .addFields({
+            name: "You should probably feel a little ashamed, you all just got clowned on",
+            value: "The clown is the game's first winner! Bravo!.",
+            inline: true,
+          })
+          .setTimestamp();
+
+        gameState.gameChannel.send({ embeds: [embed] });
       }
+      const waysToDie = [
+        "was carried by the townsfolk and dropped into a nearby volcano.",
+        "was strapped to an ICBM by the town and launched out of the town. There was no parachute",
+        "was given a lethal dose of weed and perished instantly.",
+        "was picked up by a lord of the rings eagle and carried back to feed her chicks.",
+        "has been sent to start a single-person colony on Mars. We wish them luck",
+        "was bonked in the head with a 2x4 by a visiting gorilla.",
+        "was struck down by lightning on the spot. This could be an act of god.",
+        "was killed by a pretty nasty static shock from wearing a sweater that was just too fluffy.",
+        "was ran over by a herd of water buffalo migrating through the area.",
+        "ascended to a higher plane right there in the town, wow! Still dead though.",
+        "was immediately shot down by the town's oldest resident; Ms. Pancakes aged 93.",
+        "as a result their head exploded! Ew!",
+        "was pecked to death by a swarm of angry seagulls who thought they were a french fry.",
+        "was guillotined by the angry townsfolk!",
+        "was crushed by 10,000 bowling balls during the town's yearly bowling jubilee.",
+      ];
+      const wayToDie = waysToDie.sort(() => Math.random() - 0.5)[0];
 
       await channel.send(
-        `🚫 **<@${expelledPlayer}> has been expelled from the game. Their role was: ${role.toUpperCase()}**`
+        `🚫 **<@${expelledPlayer}> was voted out and ${wayToDie} ${alignmentNotification}**`
       );
     } else {
       await channel.send(
