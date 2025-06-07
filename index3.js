@@ -8,6 +8,7 @@ const {
   ChannelType,
   StringSelectMenuBuilder,
   PermissionsBitField,
+  ThreadAutoArchiveDuration,
 } = require("discord.js");
 
 const config = require("./config.js");
@@ -20,7 +21,121 @@ const client = new Client({
     GatewayIntentBits.GuildMembers,
   ],
 });
-
+const wittyNouns = [
+  // Original 30
+  "Kazoo",
+  "Pajamas",
+  "Goblin",
+  "Mustache",
+  "Shenanigans",
+  "Fluff",
+  "Nonsense",
+  "Tomfoolery",
+  "Hullabaloo",
+  "Doohickey",
+  "Widget",
+  "Gadget",
+  "Whatchamacallit",
+  "Thingamajig",
+  "Malarkey",
+  "Hootenanny",
+  "Kerfuffle",
+  "Balderdash",
+  "Claptrap",
+  "Folderol",
+  "Snickerdoodle",
+  "Flibbertigibbet",
+  "Brouhaha",
+  "Skullduggery",
+  "Hullaballoon",
+  "Nincompoop",
+  "Skedaddle",
+  "Whippersnapper",
+  "Lollygag",
+  "Hobnob",
+  "Dinglehopper",
+  "Fandango",
+  "Gibberish",
+  "Hodgepodge",
+  "Hokum",
+  "Hullaballoo",
+  "Jiggerypokery",
+  "Klutz",
+  "Mumbojumbo",
+  "Poppycock",
+  "Ragamuffin",
+  "Rigmarole",
+  "Scallywag",
+  "Shenanigan",
+  "Skedaddler",
+  "Slapstick",
+  "Shenanigator",
+  "Thingummy",
+  "Widdershins",
+  "Yahoo",
+  "Zigzag",
+  "Blunderbuss",
+  "Cahoots",
+  "Doodad",
+  "Flapdoodle",
+  "Gobbledygook",
+  "Higgledypiggledy",
+  "Hullabuster",
+  "Knickerbocker",
+  "Lugubrious",
+];
+const abstractEdgyAdjectives = [
+  "Eldritch",
+  "Sonder",
+  "Liminal",
+  "Vexing",
+  "Oblivious",
+  "Hollow",
+  "Fractured",
+  "Gauche",
+  "Voidspun",
+  "Withering",
+  "Nihilistic",
+  "Haphazard",
+  "Feverish",
+  "Gnarled",
+  "Languid",
+  "Mordant",
+  "Pallid",
+  "Quicksand",
+  "Rancid",
+  "Spectral",
+  "Torpor",
+  "Umbral",
+  "Vexed",
+  "Wan",
+  "Xenolithic",
+  "Yawning",
+  "Zephyrous",
+  "Chthonic",
+  "Blighted",
+  "Crepuscular",
+  "Drifting",
+  "Effete",
+  "Fugue",
+  "Guttering",
+  "Howling",
+  "Inchoate",
+  "Jaded",
+  "Kaleidotic",
+  "Lurid",
+  "Miasmic",
+  "Nebulous",
+  "Ossified",
+  "Puckered",
+  "Queasy",
+  "Riven",
+  "Screaming",
+  "Threnodic",
+  "Unmoored",
+  "Vermicular",
+  "Wretched",
+];
 let gameState = {
   players: [],
   allPlayers: [],
@@ -62,6 +177,11 @@ let gameState = {
   mafiaTimeout: null,
   currentRound: 0,
   mafiaThread: null,
+  startNow: false,
+  voteMessage: null,
+  voteEmbed: null,
+  graveyard: null,
+  gameName: null,
 };
 const interactions = new Map();
 let gameInterval = null;
@@ -105,6 +225,15 @@ client.on("messageCreate", async (message) => {
       gameState.gameChannel = message.channel;
 
       await startGame(message);
+    }
+    if (message.content === "-startEarly") {
+      if (!member.roles.cache.has(config.allowedRoleId)) {
+        await message.reply(
+          "❌ **You do not have permission to start the game.**"
+        );
+        return;
+      }
+      gameState.startNow = true;
     }
     if (message.content === "-restartmafia") {
       if (!member.roles.cache.has(config.allowedRoleId)) {
@@ -218,9 +347,12 @@ async function startGame(message) {
 
     gameState.gameActive = true;
     gameState.allPlayers = [];
-
+    gameState.gameName =
+      abstractEdgyAdjectives.sort(() => Math.random() - 0.5)[0] +
+      "-" +
+      wittyNouns.sort(() => Math.random() - 0.5)[0];
     const embed = new EmbedBuilder()
-      .setTitle("🔥 **Mafia Game** 🔥")
+      .setTitle(`🔥 **Mafia Game: ${gameState.gameName}** 🔥`)
       .setDescription(
         `Click the button below to join the game.\n\nThe game will start in ${
           config.startTime / 1000
@@ -297,7 +429,7 @@ async function startGame(message) {
             `Click the button below to join the game.\n\nThe game will start soon!`
           );
 
-        if (timeLeft <= 0) {
+        if (timeLeft <= 0 || gameState.startNow) {
           clearInterval(gameInterval);
           gameInterval = null;
 
@@ -437,13 +569,23 @@ client.on("interactionCreate", async (interaction) => {
   }
 });
 
+async function sendPlayerToHell(playerId) {
+  if (gameState.graveyard != null) {
+    await gameState.graveyard.add(playerId);
+    await gameState.graveyard.send(
+      `<@${playerId}>\n💀 **You have died! Welcome to the graveyard where you can discuss the realm of the living without fear of spoiling the game for others**`
+    );
+  }
+}
 async function assignRoles(channel) {
   try {
     if (!gameState.gameActive) return;
 
     gameState.allPlayers = [...gameState.players];
 
-    const shuffledPlayers = gameState.players.sort(() => Math.random() - 0.5);
+    const shuffledPlayers = [...gameState.players].sort(
+      () => Math.random() - 0.5
+    );
     gameState.hasPresident = shuffledPlayers.length >= 7;
     if (shuffledPlayers.length < 6) {
       await channel.send(
@@ -504,12 +646,17 @@ async function assignRoles(channel) {
         );
       }
     }
-
+    gameState.graveyard = await channel.threads.create({
+      name: `GRAVEYARD -${gameState.gameName} `,
+      autoArchiveDuration: ThreadAutoArchiveDuration.OneWeek,
+      type: ChannelType.PrivateThread,
+      invitable: false,
+    });
     if (gameState.mafias.length >= 2) {
       try {
         const mafiaThread = await channel.threads.create({
-          name: `Mafia Chat - Game ${gameState.currentRound}`,
-          autoArchiveDuration: 60,
+          name: `Mafia Chat -${gameState.gameName} `,
+          autoArchiveDuration: ThreadAutoArchiveDuration.OneWeek,
           type: ChannelType.PrivateThread,
           invitable: false,
         });
@@ -657,6 +804,10 @@ function resetGame() {
     mafiaTimeout: null,
     currentRound: 0,
     mafiaThread: null,
+    voteMessage: null,
+    voteEmbed: null,
+    graveyard: null,
+    gameName: null,
   };
 
   interactions.clear();
@@ -717,14 +868,6 @@ async function startMafiaPhase(channel) {
     saveGameState();
     gameState.currentRound += 1;
 
-    if (
-      gameState.shieldedPlayerRound !== null &&
-      gameState.currentRound > gameState.shieldedPlayerRound
-    ) {
-      gameState.shieldedPlayer = null;
-      gameState.shieldedPlayerRound = null;
-    }
-
     if (gameState.mafiaActions != null) {
       console.log(typeof gameState.mafiaActions);
       gameState.mafiaActions.clear();
@@ -744,14 +887,6 @@ async function startMafiaPhase(channel) {
     }
 
     let availableTargets = alivePlayers;
-    if (
-      gameState.shieldedPlayer &&
-      gameState.players.includes(gameState.shieldedPlayer)
-    ) {
-      availableTargets = availableTargets.filter(
-        (player) => player !== gameState.shieldedPlayer
-      );
-    }
 
     if (availableTargets.length === 0) {
       await channel.send("❌ **There are no players the mafia can kill.**");
@@ -1096,19 +1231,11 @@ async function startBodyguardPhase(channel) {
     if (!gameState.gameActive) return;
     gameState.currentPhase = "bodyguard";
     saveGameState();
-    if (
-      gameState.bodyguardUsedAbility ||
-      !gameState.players.includes(gameState.bodyguard)
-    ) {
-      if (gameState.bodyguardUsedAbility) {
-        await gameState.gameChannel.send(
-          "🛡️ **The bodyguard has already used their ability so skipping.**"
-        );
-      } else {
-        await gameState.gameChannel.send(
-          "🛡️ **The bodyguard is not present so skipping.**"
-        );
-      }
+    if (!gameState.players.includes(gameState.bodyguard)) {
+      await gameState.gameChannel.send(
+        "🛡️ **The bodyguard is not present so skipping.**"
+      );
+
       startDetectorPhase(channel);
       return;
     }
@@ -1116,14 +1243,12 @@ async function startBodyguardPhase(channel) {
     gameState.bodyguardPhaseEnded = false;
 
     await gameState.gameChannel.send(
-      "🛡️ **Bodyguard, it is your turn to give a shield.**"
+      "🛡️ **Bodyguard, it is your turn to choose a player to protect. Keep in mind you will die for them if they are targeted by the mafia**"
     );
 
-    await gameState.gameChannel.send(
-      "🛡️ **You can give a shield to one player once in the game.**"
+    const alivePlayers = gameState.players.filter(
+      (player) => player !== gameState.bodyguard
     );
-
-    const alivePlayers = gameState.players;
     const buttons = [];
     for (var i in alivePlayers) {
       var target = alivePlayers[i];
@@ -1139,16 +1264,11 @@ async function startBodyguardPhase(channel) {
       );
     }
 
-    const skipButton = new ButtonBuilder()
-      .setCustomId("skip_shield")
-      .setLabel("Skip Giving Shield")
-      .setStyle(ButtonStyle.Secondary);
-
-    const rows = createButtonRows([...buttons, skipButton]);
+    const rows = createButtonRows([...buttons]);
 
     sendPlayerMessage(gameState.bodyguard, {
       content:
-        "🛡️ **You have been chosen as the bodyguard. You can give a shield to one player once in the game.**",
+        "🛡️ **You are the bodyguard. You can protect any player but at great personal risk**",
       components: rows,
       ephemeral: true,
     });
@@ -1177,35 +1297,25 @@ async function handleBodyguardShield(interaction) {
   try {
     if (!gameState.gameActive || gameState.bodyguardPhaseEnded) return;
 
-    if (gameState.bodyguardUsedAbility) {
-      await interaction.reply({
-        content: "❌ **You have already used your shield ability.**",
-        ephemeral: true,
-      });
-      return;
-    }
-
     const playerId = interaction.customId.split("_")[1];
 
     if (!gameState.players.includes(playerId)) {
       await interaction.reply({
-        content: "❌ **You cannot give a shield to this player.**",
+        content: "❌ **You cannot protect this player.**",
         ephemeral: true,
       });
       return;
     }
 
-    gameState.bodyguardUsedAbility = true;
     gameState.shieldedPlayer = playerId;
-    gameState.shieldedPlayerRound = gameState.currentRound + 1;
 
     await interaction.update({
-      content: `✅ **You have chosen to give a shield to <@${playerId}>. They will be protected in the next round.**`,
+      content: `✅ **You have decided to protect <@${playerId}>. If the mafia targets them, you will be killed instead.**`,
       components: [],
     });
 
     await gameState.gameChannel.send(
-      `🛡️ **The bodyguard has given a shield to <@${playerId}>.**`
+      `🛡️ **The bodyguard has chosen whomst to protect.**`
     );
 
     gameState.bodyguardPhaseEnded = true;
@@ -1215,7 +1325,7 @@ async function handleBodyguardShield(interaction) {
     if (!interaction.replied && !interaction.deferred) {
       await interaction.reply({
         content:
-          "❌ **An error occurred while trying to give a shield. Please try again.**",
+          "❌ **An error occurred while trying to protect.Please try again.**",
         ephemeral: true,
       });
     }
@@ -1430,9 +1540,12 @@ async function resolveNightPhase(channel) {
   try {
     if (!gameState.gameActive) return;
 
-    const killedPlayer = gameState.killedPlayer;
+    var killedPlayer = gameState.killedPlayer;
     const protectedPlayer = gameState.protectedPlayer;
 
+    if (gameState.shieldedPlayer == killedPlayer) {
+      killedPlayer = gameState.bodyguard;
+    }
     if (killedPlayer && killedPlayer !== protectedPlayer) {
       gameState.players = gameState.players.filter(
         (player) => player !== killedPlayer
@@ -1480,9 +1593,36 @@ async function resolveNightPhase(channel) {
 
         gameState.gameChannel.send({ embeds: [embed] });
       }
+
+      const murderMethods = [
+        "via blunt force trauma by someone wielding a pair of pool noodles. How persistant!",
+        "when the mafia hacked into their neuralink and ran SIGKILL.",
+        "by being pushed down the stairs from the third John Wick movie.",
+        "by a trained attack rhinocerous. Be on the lookout!",
+        "by a really gross fart.",
+        "using a commemorative Captain Sisko baseball bat.",
+        "by a swordfish ran right through the heart.",
+        "by stabbing, shooting, burning and poison at the same time.",
+        "using a wiffle bat.",
+        "outside of the town's public library, clubbed to death with their own books.",
+        "by someone who absolutely reeked of spaghetti sauce.",
+        "with a knife. Of course!",
+        "by a carefully planned evil Rube-Goldberg device hidden in the walls. The device failed catastrophically burning their house down.",
+        "with kindness? aww.",
+        "with pure telepathy!",
+        "by a massive black anvil, dropped from the sky.",
+        "by someone who had a bag of cheetos with them. There's orange dust everywhere.",
+        "by a remote operated flying lawnmower.",
+        'just mere seconds before they could get to their collection of "vintage" katanas',
+        "in glorious battle against an army of warriors from the opposing clans! Qa'Pla!",
+        "by someone dressed up as Robocop.",
+      ];
+      const murderMethod = murderMethods.sort(() => Math.random() - 0.5)[0];
+
       await gameState.gameChannel.send(
-        `💀 **<@${killedPlayer}> was killed tonight. :rip:**`
+        `💀 **<@${killedPlayer}> was killed by the mafia tonight. They were killed ${murderMethod}**`
       );
+      await sendPlayerToHell(killedPlayer);
     } else if (killedPlayer && killedPlayer === protectedPlayer) {
       await gameState.gameChannel.send(
         `💉 **The killing failed because <@${protectedPlayer}> was protected by the doctor.**`
@@ -1603,8 +1743,8 @@ async function startVotePhase(channel) {
       gameState.voteTimeout = null;
     }
 
-    const alivePlayers = gameState.players;
-
+    const alivePlayers = [...gameState.players];
+    alivePlayers.sort(() => Math.random() - 0.5);
     if (alivePlayers.length <= 2) {
       if (checkWinConditions(channel)) {
         return;
@@ -1613,7 +1753,7 @@ async function startVotePhase(channel) {
     console.log(JSON.stringify(alivePlayers));
     // Create the voting buttons for players
     const buttons = [];
-    for (var i in alivePlayers) {
+    for (var i in [...alivePlayers]) {
       var target = alivePlayers[i];
       var targetObj = channel?.guild?.members?.cache.get(target);
       if (targetObj == null || targetObj == undefined) {
@@ -1669,10 +1809,41 @@ async function startVotePhase(channel) {
       controlButtonsRow = new ActionRowBuilder().addComponents(skipButton);
     }
     await disableButtonsInChannel(channel);
+    var playersWhoNeedToVote = [...gameState.players];
 
-    await gameState.gameChannel.send({
-      content:
-        "🗳️ **It is time to vote! Choose who you think is the mafia or choose to skip voting.**",
+    for (var [key, value] of gameState.votes) {
+      playersWhoNeedToVote = playersWhoNeedToVote.filter((p) => p != key);
+    }
+    var playerNamesNeedToVote = await Promise.all(
+      playersWhoNeedToVote.map(async (p) => {
+        var targetObj = gameState.gameChannel?.guild?.members?.cache.get(p);
+        if (targetObj == null || targetObj == undefined) {
+          targetObj = await client.users.fetch(p);
+          if (targetObj == null) {
+            targetObj = await guild?.members.fetch(p);
+          }
+        }
+        return targetObj?.displayName || targetObj?.globalName || "Unknown";
+      })
+    );
+
+    gameState.voteEmbed = new EmbedBuilder()
+      .setTitle("🔥 **MURDER ELECTION!** 🔥")
+      .setDescription(
+        "🗳️ **It is time to vote! Choose who you think is the mafia or choose to skip voting.**"
+      )
+      .setColor("#FF4500")
+      .setThumbnail(client.user.displayAvatarURL())
+      .addFields({
+        name: "Who still needs to vote:",
+        value: `${playerNamesNeedToVote.join(", ")}`,
+        inline: true,
+      })
+      .setFooter({ text: "Join now and enjoy the game!" })
+      .setTimestamp();
+
+    gameState.voteMessage = await gameState.gameChannel.send({
+      embeds: [gameState.voteEmbed],
       components: [...votingButtonRows, controlButtonsRow],
     });
 
@@ -1746,6 +1917,28 @@ async function handleVote(interaction) {
         );
       }
     }
+    var playersWhoNeedToVote = [...gameState.players];
+
+    for (var [key, value] of gameState.votes) {
+      playersWhoNeedToVote = playersWhoNeedToVote.filter((p) => p != key);
+    }
+    var playerNamesNeedToVote = await Promise.all(
+      playersWhoNeedToVote.map(async (p) => {
+        var targetObj = gameState.gameChannel?.guild?.members?.cache.get(p);
+        if (targetObj == null || targetObj == undefined) {
+          targetObj = await client.users.fetch(p);
+          if (targetObj == null) {
+            targetObj = await guild?.members.fetch(p);
+          }
+        }
+        return targetObj?.displayName || targetObj?.globalName || "Unknown";
+      })
+    );
+    const updatedEmbed = EmbedBuilder.from(gameState.voteEmbed).setFields({
+      name: "Who still needs to vote:",
+      value: `${playerNamesNeedToVote}`,
+      inline: true,
+    });
 
     const updatedComponents = await Promise.all(
       interaction.message.components.map(async (row) =>
@@ -1786,7 +1979,7 @@ async function handleVote(interaction) {
     );
 
     await interaction.message.edit({
-      content: interaction.message.content,
+      embeds: [updatedEmbed],
       components: updatedComponents,
     });
 
@@ -1848,6 +2041,28 @@ async function handleSkipVote(interaction) {
         );
       }
     }
+    var playersWhoNeedToVote = [...gameState.players];
+
+    for (var [key, value] of gameState.votes) {
+      playersWhoNeedToVote = playersWhoNeedToVote.filter((p) => p != key);
+    }
+    var playerNamesNeedToVote = await Promise.all(
+      playersWhoNeedToVote.map(async (p) => {
+        var targetObj = gameState.gameChannel?.guild?.members?.cache.get(p);
+        if (targetObj == null || targetObj == undefined) {
+          targetObj = await client.users.fetch(p);
+          if (targetObj == null) {
+            targetObj = await guild?.members.fetch(p);
+          }
+        }
+        return targetObj?.displayName || targetObj?.globalName || "Unknown";
+      })
+    );
+    const updatedEmbed = EmbedBuilder.from(gameState.voteEmbed).setFields({
+      name: "Who still needs to vote:",
+      value: `${playerNamesNeedToVote}`,
+      inline: true,
+    });
     const updatedComponents = await Promise.all(
       interaction.message.components.map(async (row) =>
         new ActionRowBuilder().addComponents(
@@ -1887,7 +2102,7 @@ async function handleSkipVote(interaction) {
     );
 
     await interaction.message.edit({
-      content: interaction.message.content,
+      embeds: [updatedEmbed],
       components: updatedComponents,
     });
 
@@ -2160,12 +2375,18 @@ async function tallyVotes(channel) {
         "was pecked to death by a swarm of angry seagulls who thought they were a french fry.",
         "was guillotined by the angry townsfolk!",
         "was crushed by 10,000 bowling balls during the town's yearly bowling jubilee.",
+        "was sent on a submarine expedition to see the wreck of the Titanic.",
+        "while fleeing the townsfolk, quickly turned to run down what appeared to be a tunnel. However, the tunnel was actually just a painting of a tunnel. They crashed into the cliff at such velocity that their entire body was flattened into the thickness of a dinner plate.",
+        "was fed to the town's giant catfish: Skrimpo",
+        "was turned into a brundlefly by the town's local Jeff Goldbloom.",
+        "was sent down into the furniture mines, never to see the light of day again.",
       ];
       const wayToDie = waysToDie.sort(() => Math.random() - 0.5)[0];
 
       await channel.send(
         `🚫 **<@${expelledPlayer}> was voted out and ${wayToDie} ${alignmentNotification}**`
       );
+      await sendPlayerToHell(expelledPlayer);
     } else {
       await channel.send(
         "⚖️ **There was a tie in votes. No player will be eliminated.**"
