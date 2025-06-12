@@ -11,7 +11,6 @@
 ## 📖 Table of Contents
 
 - [Features](#features)
-- [Demo](#demo)
 - [Installation](#installation)
   - [Prerequisites](#prerequisites)
   - [Setup](#setup)
@@ -28,12 +27,11 @@
 ## 🎉 Features
 
 - **Role Assignment:** Automatically assigns roles such as Mafia, Doctor, Detective, Bodyguard, Mayor, and President.
-- **Private Mafia Chat:** Maffias have their own private thread to discuss strategies.
+- **Private Mafia Chat:** Mafias have their own private thread to discuss strategies.
 - **Interactive Phases:** Engaging button-based interactions for joining/leaving games, voting, and using special abilities.
 - **Multiple Abilities:** Roles like Doctor, Detective, Bodyguard, Mayor, and President have unique abilities to influence the game.
 - **Win Condition Checks:** Automatically determines when the game has been won by either the Mafia or the Citizens.
 - **Robust Error Handling:** Ensures smooth gameplay with comprehensive error management.
-- **Localization:** Supports Arabic and English for broader accessibility.
 
 ## 🛠 Installation
 
