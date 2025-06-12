@@ -49,7 +49,6 @@
 
    ```bash
    git clone https://github.com/bearstronk/donbot.git
-   cd wick-mafia
    ```
 
 2. **Install Dependencies:**
@@ -61,7 +60,7 @@
 3. **Create a Discord Bot:**
 
    - Go to the [Discord Developer Portal](https://discord.com/developers/applications).
-   - Click on **"New Application"** and name it (e.g., Wick Mafia).
+   - Click on **"New Application"** and name it (e.g., Donbot) 
    - Navigate to the **"Bot"** section and click **"Add Bot"**.
    - Copy the **Bot Token**. **Keep it secure!**
 
@@ -174,8 +173,8 @@ module.exports = {
 2. **Role Assignment:**
 
    - Roles are randomly assigned:
-     - **Mafia:** 1-4 players based on total players.
-     - **Doctor, Detective, Bodyguard, Mayor, President:** 1 player each.
+     - **Mafia:** Based on player total 1 Mafia per four players up to 4 total  mafia.
+     - **Doctor, Detective, Bodyguard, Mayor, President, Clown:** 1 player each.
      - **Citizens:** Remaining players.
    - Mafia members get a private thread to discuss.
 
@@ -196,12 +195,15 @@ module.exports = {
    - **Citizens Win:** All Mafia members are eliminated.
    - **Mafia Wins:** Mafia members equal or outnumber citizens.
 
+6. **Independent Win Conditons**
+  - **Clown:** The clown instead has to win by tricking the town into voting for them during the day phase. If the clown lives until the end of the game the clown loses. If the clown is killed by the Mafia, the clown loses.  THE CLOWN WINNING OR LOSING DOES NOT EFFECT THE LARGER GAME AT HAND
+
 ### 📌 Special Abilities
 
 - **President:**
-  - Can redirect all votes to a selected player once per game.
+  - Can override a day phase vote with a Veto and choose who is voted out.
 - **Mayor:**
-  - Has a voting power of two votes.
+  - Has a day phase voting power of two votes.
 - **Detective:**
   - Can reveal a player's role once per game.
 - **Doctor:**
@@ -209,7 +211,7 @@ module.exports = {
 - **Bodyguard:**
   - Can shield a player from being killed once per game.
 - **Clown:**
-  - You're here to cause chaos and be voted out of the town before the Mafia wins.
+  - An agent of chaos whose goal is to get killed and sow dissent. 
 
 ### 🛠️ Buttons and Interactions
 
@@ -218,7 +220,9 @@ module.exports = {
 - **Voting:**
   - Players vote using buttons to eliminate a suspected Mafia member.
 - **Special Abilities:**
-  - Buttons are provided for roles to use their unique abilities during their turn.
+    **President**:On clicking the Veto button the player can choose any individual to remove from the game.
+    **Detective**: On clicking the Detect button the player can choose any individual and reveal their role.
+
 
 ---
 
@@ -264,7 +268,6 @@ This project is licensed under the [MIT License](LICENSE).
 - **GitHub:** [Donbot](https://github.com/bearstronk/donbot)
 - **Discord:** bearstrong
 
-Feel free to reach out for any queries, feedback, or support!
 
 ---
 
