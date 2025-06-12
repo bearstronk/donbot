@@ -1,10 +1,10 @@
-# Wick Mafia
+# Donbot
 
-![GitHub](https://img.shields.io/github/license/wickstudio/wick-mafia)
+![GitHub](https://github.com/bearstronk/donbot)
 ![Discord.js](https://img.shields.io/badge/Discord.js-14.16.2-blue)
 ![Node.js](https://img.shields.io/badge/Node.js-16.0.0-green)
 
-**Wick Mafia** is a feature-rich Discord bot that brings the classic Mafia game to your server. Engage your community in thrilling rounds of strategy, deception, and teamwork. Whether you're a seasoned Mafia player or new to the game, Wick Mafia offers an immersive experience for everyone.
+**Donbot** is a feature-rich Discord bot that brings the a long form Mafia bot to your server, based on a mix of standard Mafia and Town of Salem ruleset!
 
 ---
 
@@ -35,14 +35,6 @@
 - **Robust Error Handling:** Ensures smooth gameplay with comprehensive error management.
 - **Localization:** Supports Arabic and English for broader accessibility.
 
----
-
-## 🎥 Demo
-
-Check out our [YouTube Demo](https://youtu.be/QINI2qXVpy4) to see Wick Mafia in action!
-
----
-
 ## 🛠 Installation
 
 ### Prerequisites
@@ -56,7 +48,7 @@ Check out our [YouTube Demo](https://youtu.be/QINI2qXVpy4) to see Wick Mafia in 
 1. **Clone the Repository:**
 
    ```bash
-   git clone https://github.com/wickstudio/wick-mafia.git
+   git clone https://github.com/bearstronk/donbot.git
    cd wick-mafia
    ```
 
@@ -79,6 +71,7 @@ Check out our [YouTube Demo](https://youtu.be/QINI2qXVpy4) to see Wick Mafia in 
 
      ```javascript
      module.exports = {
+      
          token: 'YOUR_DISCORD_BOT_TOKEN',
          allowedRoleId: 'ROLE_ID_ALLOWED_TO_START_GAME',
          startTime: 30000, // Time in milliseconds before the game starts after initiation
@@ -125,8 +118,8 @@ Check out our [YouTube Demo](https://youtu.be/QINI2qXVpy4) to see Wick Mafia in 
 
    ```
    Logged in as YourBotName#1234
-   Code by Wick Studio
-   discord.gg/wicks
+   Code by Bearstrong
+   discord.gg/
    ```
 
 ---
@@ -139,14 +132,13 @@ Ensure your `config.js` is correctly set up with all necessary parameters. Here'
 module.exports = {
     token: 'YOUR_DISCORD_BOT_TOKEN',
     allowedRoleId: 'ROLE_ID_ALLOWED_TO_START_GAME',
-    startTime: 30000, // 30 seconds
-    maxPlayers: 20,
-    minPlayers: 6,
-    mafiaKillTime: 60000, // 60 seconds
-    docActionTime: 60000,
-    bodyguardPhaseTime: 60000,
-    detectorPhaseTime: 60000,
-    citizenVoteTime: 60000,
+    startTime: 86400000, 
+    mafiaKillTime: 2147483647, 
+    docActionTime: 2147483647, 
+    detectorPhaseTime: 2147483647, 
+    citizenVoteTime: 2147483647, 
+    bodyguardPhaseTime: 2147483647, 
+    maxPlayers: 20, 
 };
 ```
 
@@ -163,7 +155,7 @@ module.exports = {
 
 - **Start Game:**
 
-  - **Command:** `-مافيا`
+  - **Command:** `-mafia`
   - **Description:** Initiates the Mafia game. Only users with the specified role (`allowedRoleId`) can use this command.
   - **Example:**
     ```
@@ -174,7 +166,7 @@ module.exports = {
 
 1. **Starting the Game:**
 
-   - A user with the allowed role sends the `-مافيا` command.
+   - A user with the allowed role sends the `-mafia` command.
    - The bot sends an embed with buttons to **Join** or **Leave** the game.
    - Players click **Join** to participate.
    - After the countdown (`startTime`), the game begins if the minimum number of players is met.
@@ -216,6 +208,8 @@ module.exports = {
   - Can protect a player from being killed once per game.
 - **Bodyguard:**
   - Can shield a player from being killed once per game.
+- **Clown:**
+  - You're here to cause chaos and be voted out of the town before the Mafia wins.
 
 ### 🛠️ Buttons and Interactions
 
@@ -266,10 +260,9 @@ This project is licensed under the [MIT License](LICENSE).
 
 ## 📫 Contact
 
-- **Author:** Wick Studio
-- **Email:** [wick@wick-studio.com](mailto:wick@wick-studio.com)
-- **GitHub:** [WickStudio](https://github.com/wickstudio)
-- **Discord:** [discord.gg/wicks](https://discord.gg/wicks)
+- **Author:** Bearstrong
+- **GitHub:** [Donbot](https://github.com/bearstronk/donbot)
+- **Discord:** bearstrong
 
 Feel free to reach out for any queries, feedback, or support!
 
@@ -279,9 +272,7 @@ Feel free to reach out for any queries, feedback, or support!
 
 - **Additional Roles:** Introduce more unique roles to diversify gameplay.
 - **Customization:** Allow server admins to customize roles and game settings.
-- **Voice Integration:** Incorporate voice channels for real-time discussions.
-- **Statistics Tracking:** Keep track of player stats and game histories.
 
 ---
 
-Thank you for choosing **Wick Mafia**! May the best team win. 🎭
+Thank you for checking out this longform Mafia Discord Bot!
