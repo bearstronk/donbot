@@ -139,14 +139,26 @@ const abstractEdgyAdjectives = [
 let gameState = {
   players: [],
   allPlayers: [],
+  originalRoles: {
+    mafias: [],
+    doctor: null,
+    detective: null,
+    bodyguard: null,
+    mayor: null,
+    president: null,
+    clown: null,
+    citizens: [],
+  },
   playerRoles: new Map(),
-  currentPhase: "mafia",
+  currentPhase: "startup",
   mafias: [],
   doctor: null,
-  detector: null,
+  detective: null,
   gameChannel: null,
+  gameChannelId: null,
   bodyguard: null,
   mayor: null,
+  citizens: [],
   president: null,
   presidentUsedAbility: false,
   gameActive: false,
@@ -155,13 +167,16 @@ let gameState = {
   shieldedPlayerRound: null,
   killedPlayer: null,
   clown: null,
+  citizenActions: new Map(),
+  citizenPhaseEnded: false,
+  citizensUsedAbility: [],
   votes: new Map(),
   skipVotes: 0,
   totalVotes: 0,
   mafiaActions: new Map(),
   doctorActionTaken: false,
   doctorPhaseEnded: false,
-  detectorUsedAbility: false,
+  detectiveUsedAbility: false,
   hasPresident: false,
   bodyguardUsedAbility: false,
   bodyguardPhaseEnded: false,
@@ -169,28 +184,38 @@ let gameState = {
   mafiaMessages: new Map(),
   mafiaInteractions: new Map(),
   doctorInteraction: null,
-  detectorInteraction: null,
+  detectiveInteraction: null,
   bodyguardInteraction: null,
+  detectivePhaseEnded: false,
   mayorInteraction: null,
   votePhaseActive: false,
   mafiaPhaseEnded: false,
-  mafiaTimeout: null,
   currentRound: 0,
   mafiaThread: null,
+  mafiaThreadId: null,
   startNow: false,
   voteMessage: null,
   voteEmbed: null,
   graveyard: null,
+  graveyardId: null,
   gameName: null,
+  detectiveTarget: null,
 };
 const interactions = new Map();
 let gameInterval = null;
 let gameTimeouts = [];
 
 function saveGameState() {
+  var stateToSave = { ...gameState };
+  stateToSave.graveyardId = gameState.graveyard.id;
+  stateToSave.gameChannelId = gameState.gameChannel.id;
+  stateToSave.mafiaThreadId = gameState.mafiaThread.id;
+  stateToSave.gameChannel = null;
+  stateToSave.mafiaThread = null;
+  stateToSave.graveyard = null;
   fs.writeFile(
     "gameState.json",
-    JSON.stringify(gameState),
+    JSON.stringify(stateToSave),
     "utf8",
     function () {
       return;
@@ -251,43 +276,67 @@ client.on("messageCreate", async (message) => {
             console.log(err);
           } else {
             gameState = JSON.parse(data); //now it an object
+            gameState.gameChannel = message.channel;
+
             gameState.playerRoles = new Map();
-            for (const mafia of gameState.mafias) {
+            for (const mafia of gameState.originalRoles.mafias) {
               gameState.playerRoles.set(mafia, "mafia");
             }
-            gameState.playerRoles.set(gameState.doctor, "doctor");
-            gameState.playerRoles.set(gameState.detector, "detective");
-            gameState.playerRoles.set(gameState.bodyguard, "bodyguard");
-            gameState.playerRoles.set(gameState.mayor, "mayor");
-            gameState.playerRoles.set(gameState.president, "president");
-            gameState.playerRoles.set(gameState.clown, "clown");
+            gameState.playerRoles.set(gameState.originalRoles.doctor, "doctor");
+            gameState.playerRoles.set(
+              gameState.originalRoles.detective,
+              "detective"
+            );
+            gameState.playerRoles.set(
+              gameState.originalRoles.bodyguard,
+              "bodyguard"
+            );
+            gameState.playerRoles.set(gameState.originalRoles.mayor, "mayor");
+            gameState.playerRoles.set(
+              gameState.originalRoles.president,
+              "president"
+            );
+            gameState.playerRoles.set(gameState.originalRoles.clown, "clown");
             for (const player of gameState.players) {
               if (!gameState.playerRoles.has(player)) {
                 gameState.playerRoles.set(player, "citizen");
               }
             }
+            gameState.citizenActions = new Map();
             gameState.mafiaActions = new Map();
             gameState.votes = new Map();
             gameState.gameChannel = message.channel;
+            if (gameState.gameChannel == null) {
+              gameState.gameChannel = await client.channels.get(
+                "1373451640551768094"
+              );
+            }
             if (gameState.mafiaThread != null) {
               gameState.mafiaThread = await client.channels.fetch(
                 gameState.mafiaThread.id
               );
+            } else {
+              if (gameState.mafiaThreadId != null) {
+                gameState.mafiaThread =
+                  gameState.gameChannel.threads.cache.find(
+                    (x) => x.id === gameState.mafiaThreadId
+                  );
+              }
+            }
+            if (gameState.graveyardId != null) {
+              gameState.graveyard = gameState.gameChannel.threads.cache.find(
+                (x) => x.id === gameState.graveyardId
+              );
             }
             switch (gameState.currentPhase) {
-              case "mafia":
-                startMafiaPhase(message.channel);
+              case "roles":
+                assignRoles(message.channel);
                 return;
-              case "doctor":
-                startDoctorPhase(message.channel);
+              case "night":
+                startNightPhase(message.channel);
                 return;
-              case "bodyguard":
-                startBodyguardPhase(message.channel);
-                return;
-              case "detective":
-                startDetectorPhase(message.channel);
-                return;
-              case "voting":
+
+              case "day":
                 startVotePhase(message.channel);
                 return;
               default:
@@ -298,27 +347,6 @@ client.on("messageCreate", async (message) => {
           }
         }
       );
-    }
-    if (message.content === "-mafiadev") {
-      if (!member.roles.cache.has(config.allowedRoleId)) {
-        await message.reply(
-          "❌ **You do not have permission to start the game.**"
-        );
-        return;
-      }
-      gameState.gameChannel = message.channel;
-      gameState.players = [
-        "184489605901320192",
-        "153731907450830850",
-        "205333145694765066",
-        "227965282445033482",
-        "422075169495056384",
-        "148185292187238400",
-      ];
-      gameState.allPlayers = [...gameState.players];
-      await message.channel.send(" trying restart**");
-      gameState.gameActive = true;
-      await assignRoles(message.channel);
     }
   } catch (error) {
     console.error("Error in messageCreate:", error);
@@ -344,7 +372,6 @@ async function sendPlayerMessage(playerId, message) {
 async function startGame(message) {
   try {
     resetGame();
-
     gameState.gameActive = true;
     gameState.allPlayers = [];
     gameState.gameName =
@@ -454,7 +481,6 @@ async function startGame(message) {
               })
               .catch((error) => {
                 console.error("Error editing game message:", error);
-                gameState.gameMessage = null;
               });
           }
 
@@ -537,18 +563,48 @@ client.on("interactionCreate", async (interaction) => {
           ephemeral: true,
         });
       }
-    } else if (customId.startsWith("kill_")) {
+    } else if (
+      customId.startsWith("vibeFrom_") &&
+      gameState.currentPhase == "night"
+    ) {
+      await handleCitizenVibeFrom(interaction);
+    } else if (
+      customId.startsWith("vibeTo_") &&
+      gameState.currentPhase == "night"
+    ) {
+      await handleCitizenVibeTo(interaction);
+    } else if (
+      customId.startsWith("skip_vibe") &&
+      gameState.currentPhase == "night"
+    ) {
+      await handleCitizenSkipVibe(interaction);
+    } else if (
+      customId.startsWith("kill_") &&
+      gameState.currentPhase == "night"
+    ) {
       await handleMafiaKill(interaction);
-    } else if (customId.startsWith("protect_")) {
+    } else if (
+      customId.startsWith("protect_") &&
+      gameState.currentPhase == "night"
+    ) {
       await handleDoctorProtect(interaction);
-    } else if (customId.startsWith("detect_")) {
-      await handleDetectorDetect(interaction);
-    } else if (customId === "skip_detect") {
-      await handleDetectorSkip(interaction);
-    } else if (customId.startsWith("shield_")) {
+    } else if (
+      customId.startsWith("detect_") &&
+      gameState.currentPhase == "night"
+    ) {
+      await handledetectiveDetect(interaction);
+    } else if (
+      customId === "skip_detect" &&
+      gameState.currentPhase == "night"
+    ) {
+      await handledetectiveSkip(interaction);
+    } else if (
+      customId.startsWith("shield_") &&
+      gameState.currentPhase == "night"
+    ) {
       await handleBodyguardShield(interaction);
-    } else if (customId === "skip_shield") {
-      await handleBodyguardSkip(interaction);
+      // } else if (customId === "skip_shield") {
+      //  await handleBodyguardSkip(interaction);
     } else if (customId.startsWith("vote_")) {
       await handleVote(interaction);
     } else if (customId === "skip_vote") {
@@ -571,7 +627,13 @@ client.on("interactionCreate", async (interaction) => {
 
 async function sendPlayerToHell(playerId) {
   if (gameState.graveyard != null) {
-    await gameState.graveyard.add(playerId);
+    console.log(JSON.stringify(gameState.graveyard));
+    if (typeof gameState.graveyard.members.add != "function") {
+      gameState.graveyard = gameState.gameChannel.threads.cache.find(
+        (x) => x.id === gameState.graveyard.id
+      );
+    }
+    await gameState.graveyard.members.add(playerId);
     await gameState.graveyard.send(
       `<@${playerId}>\n💀 **You have died! Welcome to the graveyard where you can discuss the realm of the living without fear of spoiling the game for others**`
     );
@@ -580,9 +642,10 @@ async function sendPlayerToHell(playerId) {
 async function assignRoles(channel) {
   try {
     if (!gameState.gameActive) return;
+    gameState.currentPhase = "roles";
+    saveGameState();
 
     gameState.allPlayers = [...gameState.players];
-
     const shuffledPlayers = [...gameState.players].sort(
       () => Math.random() - 0.5
     );
@@ -599,33 +662,45 @@ async function assignRoles(channel) {
     if (shuffledPlayers.length >= 8) {
       mafiaCount = 2;
     }
-    if (shuffledPlayers.length >= 15) {
+    if (shuffledPlayers.length >= 12) {
       mafiaCount = 3;
     }
-    if (shuffledPlayers.length >= 23) {
+    if (shuffledPlayers.length >= 16) {
       mafiaCount = 4;
     }
 
     gameState.mafias = shuffledPlayers.slice(0, mafiaCount);
+    gameState.originalRoles.mafias = [...gameState.mafias];
     gameState.doctor = shuffledPlayers[mafiaCount];
-    gameState.detector = shuffledPlayers[mafiaCount + 1];
+    gameState.originalRoles.doctor = gameState.doctor;
+    gameState.detective = shuffledPlayers[mafiaCount + 1];
+    gameState.originalRoles.detective = gameState.detective;
     gameState.bodyguard = shuffledPlayers[mafiaCount + 2];
+    gameState.originalRoles.bodyguard = gameState.bodyguard;
     gameState.mayor = shuffledPlayers[mafiaCount + 3];
+    gameState.originalRoles.mayor = gameState.mayor;
     gameState.clown = shuffledPlayers[mafiaCount + 4];
+    gameState.originalRoles.clown = gameState.clown;
     if (gameState.hasPresident) {
       gameState.president = shuffledPlayers[mafiaCount + 5];
+      gameState.originalRoles.president = gameState.president;
     }
     shuffledPlayers
       .slice(mafiaCount + (gameState.hasPresident ? 6 : 5))
       .forEach((player) => {
         gameState.playerRoles.set(player, "citizen");
+        gameState.citizens.push(player);
+        gameState.originalRoles.push(player);
       });
 
     for (const mafia of gameState.mafias) {
       gameState.playerRoles.set(mafia, "mafia");
     }
+    for (const mafia of gameState.citizens) {
+      gameState.playerRoles.set(mafia, "citizen");
+    }
     gameState.playerRoles.set(gameState.doctor, "doctor");
-    gameState.playerRoles.set(gameState.detector, "detective");
+    gameState.playerRoles.set(gameState.detective, "detective");
     gameState.playerRoles.set(gameState.bodyguard, "bodyguard");
     gameState.playerRoles.set(gameState.mayor, "mayor");
     gameState.playerRoles.set(gameState.clown, "clown");
@@ -710,11 +785,7 @@ async function assignRoles(channel) {
         { name: "👑 **Number of Mayors**", value: `1`, inline: true },
         {
           name: "👨‍🌾 **Number of Citizens**",
-          value: `${
-            gameState.players.length -
-            mafiaCount -
-            (gameState.hasPresident ? 6 : 5)
-          }`,
+          value: `${gameState.citizens.length}`,
           inline: true,
         },
         { name: "🤡 **Number of Clowns**", value: `1`, inline: true },
@@ -739,8 +810,9 @@ async function assignRoles(channel) {
     await channel.send(
       "🚨 **Roles have been revealed to all players. The game will start in 5 seconds.**"
     );
+    saveGameState();
 
-    const timeout = setTimeout(() => startMafiaPhase(channel), 5000);
+    const timeout = setTimeout(() => startNightPhase(channel), 5000);
     gameTimeouts.push(timeout);
   } catch (error) {
     console.error("Error in assignRoles:", error);
@@ -749,7 +821,73 @@ async function assignRoles(channel) {
 }
 
 function resetGame() {
-  if (gameState.gameMessage) {
+  let gameState = {
+    players: [],
+    allPlayers: [],
+    originalRoles: {
+      mafias: [],
+      doctor: null,
+      detective: null,
+      bodyguard: null,
+      mayor: null,
+      president: null,
+      clown: null,
+      citizens: [],
+    },
+    playerRoles: new Map(),
+    currentPhase: "startup",
+    mafias: [],
+    doctor: null,
+    detective: null,
+    gameChannel: null,
+    gameChannelId: null,
+    bodyguard: null,
+    mayor: null,
+    citizens: [],
+    president: null,
+    presidentUsedAbility: false,
+    gameActive: false,
+    protectedPlayer: null,
+    shieldedPlayer: null,
+    shieldedPlayerRound: null,
+    killedPlayer: null,
+    clown: null,
+    citizenActions: new Map(),
+    citizenPhaseEnded: false,
+    citizensUsedAbility: [],
+    votes: new Map(),
+    skipVotes: 0,
+    totalVotes: 0,
+    mafiaActions: new Map(),
+    doctorActionTaken: false,
+    doctorPhaseEnded: false,
+    detectiveUsedAbility: false,
+    hasPresident: false,
+    bodyguardUsedAbility: false,
+    bodyguardPhaseEnded: false,
+    gameMessage: null,
+    mafiaMessages: new Map(),
+    mafiaInteractions: new Map(),
+    doctorInteraction: null,
+    detectiveInteraction: null,
+    bodyguardInteraction: null,
+    detectivePhaseEnded: false,
+    mayorInteraction: null,
+    votePhaseActive: false,
+    mafiaPhaseEnded: false,
+    currentRound: 0,
+    mafiaThread: null,
+    mafiaThreadId: null,
+    startNow: false,
+    voteMessage: null,
+    voteEmbed: null,
+    graveyard: null,
+    graveyardId: null,
+    gameName: null,
+    detectiveTarget: null,
+  };
+  interactions.clear();
+  if (gameState && gameState.gameMessage) {
     disableButtons(gameState.gameMessage);
   }
 
@@ -763,62 +901,10 @@ function resetGame() {
       console.error("Error deleting mafia thread:", error);
     }
   }
-
-  gameState = {
-    players: [],
-    gameChannel: null,
-    allPlayers: [],
-    playerRoles: new Map(),
-    mafias: [],
-    currentPhase: "mafia",
-    doctor: null,
-    detector: null,
-    clown: null,
-    hasPresident: false,
-    bodyguard: null,
-    mayor: null,
-    gameActive: false,
-    protectedPlayer: null,
-    shieldedPlayer: null,
-    shieldedPlayerRound: null,
-    killedPlayer: null,
-    votes: new Map(),
-    skipVotes: 0,
-    totalVotes: 0,
-    hasPresident: false,
-    mafiaActions: new Map(),
-    doctorActionTaken: false,
-    doctorPhaseEnded: false,
-    detectorUsedAbility: false,
-    bodyguardUsedAbility: false,
-    bodyguardPhaseEnded: false,
-    gameMessage: null,
-    mafiaMessages: new Map(),
-    mafiaInteractions: new Map(),
-    doctorInteraction: null,
-    detectorInteraction: null,
-    bodyguardInteraction: null,
-    mayorInteraction: null,
-    votePhaseActive: false,
-    mafiaPhaseEnded: false,
-    mafiaTimeout: null,
-    currentRound: 0,
-    mafiaThread: null,
-    voteMessage: null,
-    voteEmbed: null,
-    graveyard: null,
-    gameName: null,
-  };
-
-  interactions.clear();
-
   if (gameInterval) {
     clearInterval(gameInterval);
     gameInterval = null;
   }
-
-  gameTimeouts.forEach((timeout) => clearTimeout(timeout));
-  gameTimeouts = [];
 
   console.log("Game state has been reset.");
 }
@@ -860,12 +946,370 @@ async function disableButtons(message) {
     }
   }
 }
+async function startNightPhase() {
+  gameState.currentPhase = "night";
+  saveGameState();
+  const embed = new EmbedBuilder()
+    .setTitle("🌕🌖🌗🌘🌑 ** THE SUN SETS ** 🌑🌒🌓🌔🌕")
+    .setDescription(
+      "**With the deliberations of the day finished, night time has begun**"
+    )
+    .setColor("#280137")
+    .addFields(
+      {
+        name: "💀 **Mafia**",
+        value: `The Mafia must choose a victim.`,
+        inline: true,
+      },
+      {
+        name: "💉 **Doctor**",
+        value: `The doctor must choose a patient.`,
+        inline: true,
+      },
+      {
+        name: "🛡️ **Bodyguards**",
+        value: `The bodyguard must choose someone to protect.`,
+        inline: true,
+      },
+      {
+        name: "🕵️‍♂️ **Detective**",
+        value: `The detective *may* choose someone to investigate.`,
+        inline: true,
+      },
+      {
+        name: "🤼 **Citizens**",
+        value: `The citizens *may* choose two players for a vibe check (see pins).`,
+        inline: true,
+      },
+      {
+        name: "🤼 **Everyone**",
+        value: `Should be careful about what they post at night.`,
+        inline: true,
+      }
+    )
+    .setFooter({ text: "Have a great sleep everyone else!" });
 
+  await gameState.gameChannel.send({ embeds: [embed] });
+
+  if (!gameState.mafiaPhaseEnded) {
+    startMafiaPhase(gameState.gameChannel);
+  }
+  if (!gameState.doctorPhaseEnded) {
+    startDoctorPhase(gameState.gameChannel);
+  }
+  if (!gameState.bodyguardPhaseEnded) {
+    startBodyguardPhase(gameState.gameChannel);
+  }
+  if (!gameState.detectivePhaseEnded) {
+    startdetectivePhase(gameState.gameChannel);
+  }
+  if (!gameState.citizenPhaseEnded) {
+    startCitizenPhase(gameState.gamechannel);
+  }
+  if (
+    gameState.detectivePhaseEnded &&
+    gameState.bodyguardPhaseEnded &&
+    gameState.doctorPhaseEnded &&
+    gameState.mafiaPhaseEnded &&
+    gameState.citizenPhaseEnded
+  ) {
+    checkIfNightEnded();
+  }
+}
+
+async function startCitizenPhase(channel) {
+  try {
+    if (!gameState.gameActive) return;
+
+    if (gameState.citizenActions != null) {
+      gameState.citizenActions.clear();
+    }
+    var embed = new EmbedBuilder()
+      .setTitle("🤸 ** Greeting Citizen **🤸")
+      .setDescription(
+        "🌋 **Ready for a vibes check? You're gonna pick two different players (other than yourself) and check if they have the same vibes or not. You will not be told what vibes the players had, only if they have the same vibes or not.**"
+      )
+      .setColor("#4B006E")
+      .addFields(
+        {
+          name: " 👍 The Good 👍",
+          value: `Doctor, Detective, Bodyguard, Clown and other Citizens all have good vibes.`,
+        },
+        {
+          name: "👎 The Bad 👎",
+          value: `Mafia and the Clown all have bad vibes.`,
+        },
+        {
+          name: "👺 The Ugly 👺",
+          value: `The Mayor, President and Clown all have ugly vibes.`,
+        }
+      )
+
+      .setFooter({
+        text: "You can only do this once a game, and may skip until you are ready. If you are ready, pick your first target.",
+      });
+
+    for (var citizen in gameState.citizens) {
+      if (!gameState.citizensUsedAbility.includes(citizen)) {
+        var availableTargets = [...alivePlayers].filter(
+          (player) => player != citizen
+        );
+
+        const buttons = [];
+        for (var i in availableTargets) {
+          var target = availableTargets[i];
+          var targetObj = channel?.guild?.members.cache.get(target);
+          if (targetObj == null) {
+            targetObj = await client.users.fetch(target);
+          }
+          buttons.push(
+            new ButtonBuilder()
+              .setCustomId(`vibeFrom_${target}`)
+              .setLabel(`${targetObj?.displayName || "Unknown"}`)
+              .setStyle(ButtonStyle.Success)
+          );
+        }
+        const skipButton = new ButtonBuilder()
+          .setCustomId("skip_vibes")
+          .setLabel("Skip Vote")
+          .setStyle(ButtonStyle.Primary);
+        buttons.push(skipButton);
+        const rows = createButtonRows(buttons);
+
+        sendPlayerMessage(citizen, {
+          embeds: embed,
+          components: rows,
+        });
+      }
+    }
+  } catch (error) {
+    console.error("Error in startCitizenPhase:", error);
+    await channel.send("❌ **An error occurred during the citizen phase.**");
+  }
+}
+async function handleCitizenSkipVibe(interaction) {
+  try {
+    if (!gameState.gameActive || gameState.citizenPhaseEnded) return;
+
+    var citizen = interaction.user.id;
+    if (!gameState.citizens.includes(citizen)) {
+      await interaction.reply({
+        content:
+          "❌ **You are not a citizen. Stop clicking old buttons its rude.**",
+        ephemeral: true,
+      });
+      return;
+    }
+    await interaction.update({
+      content:
+        "⏩ **You have chosen to skip checking vibes this round. You can still vibe check in a future round.**",
+      components: [],
+    });
+    gameState.citizenActions.set(interaction.user.id, {
+      target1: "skip",
+      target2: "skip",
+    });
+    if (gameState.mafiaActions.size === gameState.mafias.length) {
+      await resolveCitizenActions(gameState.gameChannel);
+    }
+  } catch (error) {
+    console.error("Error in handleCitizenSkipVibe:", error);
+    await channel.send("❌ **An error occurred during the citizen phase.**");
+  }
+}
+async function handleCitizenVibeFrom(interaction) {
+  try {
+    if (!gameState.gameActive || !gameState.citizenPhaseActive) {
+      await interaction.reply({
+        content: "❌ **You cannot use this ability now.**",
+        ephemeral: true,
+      });
+      return;
+    }
+
+    if (!gameState.citizens.includes(interaction.user.id)) {
+      await interaction.reply({
+        content: "❌ **This ability is for citizens only.**",
+        ephemeral: true,
+      });
+      return;
+    }
+
+    if (gameState.citizensUsedAbility.includes(interaction.user.id)) {
+      await interaction.reply({
+        content: "❌ **You have already used your ability.**",
+        ephemeral: true,
+      });
+      return;
+    }
+    var firstTargetId = interaction.customId.split("_")[1];
+    var targetObj =
+      gameState.gameChannel?.guild?.members?.cache.get(firstTargetId);
+    if (targetObj == null || targetObj == undefined) {
+      targetObj = await client.users.fetch(target);
+      if (targetObj == null) {
+        targetObj = await guild?.members.fetch(target);
+      }
+    }
+    var firstTargetName =
+      targetObj?.displayName || targetObj?.globalName || "Unknown";
+
+    // Create buttons for the President to select a player
+    const alivePlayers = [...gameState.players].filter(
+      (player) => player !== interaction.user.id && player !== firstTargetId
+    );
+    gameState.citizenActions.set(interaction.user.id, {
+      target1: firstTargetId,
+      target2: null,
+    });
+    const buttons = [];
+    for (var i in alivePlayers) {
+      var target = alivePlayers[i];
+      var targetObj = gameState.gameChannel?.guild?.members?.cache.get(target);
+      if (targetObj == null || targetObj == undefined) {
+        targetObj = await client.users.fetch(target);
+        if (targetObj == null) {
+          targetObj = await guild?.members.fetch(target);
+        }
+      }
+      buttons.push(
+        new ButtonBuilder()
+          .setCustomId(`vibeTo_${target}`)
+          .setLabel(
+            `${targetObj?.displayName || targetObj?.globalName || "Unknown"}`
+          )
+          .setStyle(ButtonStyle.Success)
+      );
+    }
+    const skipButton = new ButtonBuilder()
+      .setCustomId("skip_vibes")
+      .setLabel("Skip Vibes")
+      .setStyle(ButtonStyle.Primary);
+    buttons.push(skipButton);
+    const rows = createButtonRows(buttons);
+
+    await interaction.reply({
+      content: `🙏 **Choose the player you want to compare ${firstTargetName} with for your vibes check.**`,
+      components: rows,
+      ephemeral: true,
+    });
+  } catch (error) {
+    console.error("Error in handleCitizenVibeFrom:", error);
+    if (!interaction.replied && !interaction.deferred) {
+      await interaction.reply({
+        content:
+          "❌ **An error occurred while using the ability. Please try again.**",
+        ephemeral: true,
+      });
+    }
+  }
+}
+async function handleCitizenVibeTo(interaction) {
+  try {
+    if (!gameState.gameActive || !gameState.citizenPhaseActive) {
+      await interaction.reply({
+        content: "❌ **You cannot use this ability now.**",
+        ephemeral: true,
+      });
+      return;
+    }
+
+    if (!gameState.citizens.includes(interaction.user.id)) {
+      await interaction.reply({
+        content: "❌ **This ability is for citizens only.**",
+        ephemeral: true,
+      });
+      return;
+    }
+
+    if (gameState.citizensUsedAbility.includes(interaction.user.id)) {
+      await interaction.reply({
+        content: "❌ **You have already used your ability.**",
+        ephemeral: true,
+      });
+      return;
+    }
+    var secondTargetId = interaction.customId.split("_")[1];
+    var targetObj =
+      gameState.gameChannel?.guild?.members?.cache.get(secondTargetId);
+    if (targetObj == null || targetObj == undefined) {
+      targetObj = await client.users.fetch(secondTargetId);
+      if (targetObj == null) {
+        targetObj = await guild?.members.fetch(secondTargetId);
+      }
+    }
+
+    var secondTargetName =
+      targetObj?.displayName || targetObj?.globalName || "Unknown";
+
+    var currentVote = gameState.citizenActions.get(interaction.user.id);
+    if (currentVote == null || currentVote == undefined) {
+      await interaction.reply({
+        content:
+          "❌ **You broke the vote somehow, I don't know your first vote anymore. Please try again or contact someone**",
+        ephemeral: true,
+      });
+      return;
+    }
+    var firstTargetId = currentVote.target1;
+    if (firstTargetId == null || !gameState.players.includes(firstTargetId)) {
+      await interaction.reply({
+        content:
+          "❌ **You broke the vote somehow, your first vote was invalid for some reason. Please try again or contact someone**",
+        ephemeral: true,
+      });
+      return;
+    }
+    var targetObj2 =
+      gameState.gameChannel?.guild?.members?.cache.get(firstTargetId);
+    if (targetObj2 == null || targetObj2 == undefined) {
+      targetObj2 = await client.users.fetch(firstTargetId);
+      if (targetObj2 == null) {
+        targetObj2 = await guild?.members.fetch(firstTargetId);
+      }
+    }
+    var firstTargetName =
+      targetObj2?.displayName || targetObj2?.globalName || "Unknown";
+
+    gameState.citizenActions.set(interaction.user.id, {
+      target1: firstTargetId,
+      target2: secondTargetId,
+    });
+
+    await interaction.reply({
+      content: `🔒 **You have decided to check the vibes between ${firstTargetName} and ${secondTargetName}. You will be informed of vibe similarity at the end of the night.**`,
+      ephemeral: true,
+    });
+    var citizensDoneCount = 0;
+    for (var [key, value] of gameState.citizenActions) {
+      if (value != null && value.target2 != null) {
+        citizensDoneCount++;
+      }
+    }
+
+    if (citizensDoneCount === gameState.citizens.length) {
+      await resolveCitizenActions(gameState.gameChannel);
+    }
+  } catch (error) {
+    console.error("Error in handleCitizenVibeTo:", error);
+    if (!interaction.replied && !interaction.deferred) {
+      await interaction.reply({
+        content:
+          "❌ **An error occurred while using the ability. Please try again.**",
+        ephemeral: true,
+      });
+    }
+  }
+}
+async function resolveCitizenActions(channel) {
+  gameState.citizenPhaseEnded = true;
+
+  saveGameState();
+  checkIfNightEnded();
+}
 async function startMafiaPhase(channel) {
   try {
     if (!gameState.gameActive) return;
-    gameState.currentPhase = "mafia";
-    saveGameState();
     gameState.currentRound += 1;
 
     if (gameState.mafiaActions != null) {
@@ -894,7 +1338,7 @@ async function startMafiaPhase(channel) {
       return;
     }
 
-    await channel.send("💀 **Mafia, it is your turn to choose your victim.**");
+    // await channel.send("💀 **Mafia, it is your turn to choose your victim.**");
 
     const buttons = [];
     for (var i in availableTargets) {
@@ -919,60 +1363,16 @@ async function startMafiaPhase(channel) {
           "💀 **You have been chosen as mafia. You must choose a player to kill. If you choose different players, the victim will be chosen randomly.**",
         components: rows,
       });
-    }
-    if (gameState.mafias.length === 1) {
+    } else if (gameState.mafias.length === 1) {
       sendPlayerMessage(gameState.mafias[0], {
         content:
           "💀 **You have been chosen as mafia. You must choose a player to kill. If you choose different players, the victim will be chosen randomly.**",
         components: rows,
       });
     }
-    gameState.mafiaTimeout = setTimeout(async () => {
-      await handleMafiaTimeout(channel);
-    }, config.mafiaKillTime);
-
-    gameTimeouts.push(gameState.mafiaTimeout);
   } catch (error) {
     console.error("Error in startMafiaPhase:", error);
     await channel.send("❌ **An error occurred during the mafia phase.**");
-  }
-}
-
-async function handleMafiaTimeout(channel) {
-  try {
-    if (!gameState.gameActive || gameState.mafiaPhaseEnded) return;
-
-    for (const mafiaId of gameState.mafias.slice()) {
-      if (!gameState.mafiaActions.has(mafiaId)) {
-        await channel.send(
-          `🕒 **Mafia <@${mafiaId}> did not act in time and has been eliminated from the game.**`
-        );
-        gameState.players = gameState.players.filter(
-          (player) => player !== mafiaId
-        );
-        gameState.mafias = gameState.mafias.filter(
-          (mafia) => mafia !== mafiaId
-        );
-
-        sendPlayerMessage(
-          mafiaId,
-          "❌ **You did not choose anyone to kill and have been eliminated from the game.**"
-        );
-      }
-    }
-
-    if (gameState.mafias.length === 0) {
-      await channel.send(
-        "🎉 **The citizens win! All mafia have been eliminated.**"
-      );
-      gameState.gameActive = false;
-      checkWinConditions(channel);
-      return;
-    }
-
-    await resolveMafiaActions(gameState.gameChannel);
-  } catch (error) {
-    console.error("Error in handleMafiaTimeout:", error);
   }
 }
 
@@ -1015,10 +1415,6 @@ async function handleMafiaKill(interaction) {
       });
 
       if (gameState.mafiaActions.size === gameState.mafias.length) {
-        if (gameState.mafiaTimeout) {
-          clearTimeout(gameState.mafiaTimeout);
-          gameState.mafiaTimeout = null;
-        }
         await resolveMafiaActions(gameState.gameChannel);
       }
     } else {
@@ -1047,24 +1443,37 @@ async function resolveMafiaActions(channel) {
     const selectedTargets = Array.from(gameState.mafiaActions.values());
 
     if (selectedTargets.length === 0) {
-      await channel.send(
-        "🗡️ **The mafia did not choose any victim. Moving to the next phase.**"
-      );
-      await channel.send("💀 **The mafia did not kill anyone tonight.**");
-      const timeout = setTimeout(() => startDoctorPhase(channel), 5000);
-      gameTimeouts.push(timeout);
-      return;
+      gameState.mafiaPhaseEnded = true;
+
+      saveGameState();
+      checkIfNightEnded();
+    }
+    var targetMap = {};
+    let maxKills = 0;
+    const targetsWithMostVotes = [];
+    for (const targ of selectedTargets) {
+      targetMap[targ] = (targetMap[targ] || 0) + 1;
+      if (targetMap[targ] > maxKills) {
+        maxKills = targetMap[targ];
+      }
+    }
+    for (const targ in targetMap) {
+      if (targetMap[targ] === maxKills) {
+        targetsWithMostVotes.push(targ);
+      }
     }
 
     let targetToKill;
-    if (selectedTargets.every((val, i, arr) => val === arr[0])) {
-      targetToKill = selectedTargets[0];
+    if (targetsWithMostVotes.length === 1) {
+      targetToKill = targetsWithMostVotes[0];
     } else {
       targetToKill =
-        selectedTargets[Math.floor(Math.random() * selectedTargets.length)];
-      await channel.send(
-        `🗡️ **The mafia chose different targets. The victim will be chosen randomly.**`
-      );
+        targetsWithMostVotes[
+          Math.floor(Math.random() * targetsWithMostVotes.length)
+        ];
+      //  await channel.send(
+      //   `🗡️ **The mafia chose different targets. The victim will be chosen randomly.**`
+      //  );
     }
     gameState.killedPlayer = targetToKill;
 
@@ -1084,16 +1493,17 @@ async function resolveMafiaActions(channel) {
         ephemeral: true,
       });
     }
-    await gameState.gameChannel.send(
-      "💀 **The mafia have finished choosing.**"
-    );
+    // await gameState.gameChannel.send(
+    //  "💀 **The mafia have finished choosing.**"
+    //);
 
-    await gameState.gameChannel.send(
-      `🗡️ **The mafia have chosen a victim! Now it is the doctor's turn to protect a player.**`
-    );
+    //await gameState.gameChannel.send(
+    // `🗡️ **The mafia have chosen a victim! Now it is the doctor's turn to protect a player.**`
+    //);
+    gameState.mafiaPhaseEnded = true;
 
-    const timeout = setTimeout(() => startDoctorPhase(channel), 5000);
-    gameTimeouts.push(timeout);
+    saveGameState();
+    checkIfNightEnded();
   } catch (error) {
     console.error("Error in resolveMafiaActions:", error);
   }
@@ -1117,22 +1527,18 @@ async function handleDoctorProtect(interaction) {
       gameState.protectedPlayer = playerId;
       gameState.doctorActionTaken = true;
 
-      if (gameState.doctorTimeout) {
-        clearTimeout(gameState.doctorTimeout);
-        gameState.doctorTimeout = null;
-      }
-
       await interaction.update({
         content: `✅ **You have chosen to protect <@${playerId}>.**`,
         components: [],
       });
 
-      await gameState.gameChannel.send(
-        "💉 **The doctor has protected a player.**"
-      );
+      //  await gameState.gameChannel.send(
+      //      "💉 **The doctor has protected a player.**"
+      //  );
 
       gameState.doctorPhaseEnded = true;
-      startBodyguardPhase(gameState.gameChannel);
+      saveGameState();
+      checkIfNightEnded();
     } else {
       if (!interaction.deferred)
         await interaction.deferReply({ ephemeral: true });
@@ -1155,69 +1561,45 @@ async function handleDoctorProtect(interaction) {
 async function startDoctorPhase(channel) {
   try {
     if (!gameState.gameActive) return;
-    gameState.currentPhase = "doctor";
-    saveGameState();
     gameState.doctorActionTaken = false;
     gameState.doctorPhaseEnded = false;
 
     const alivePlayers = gameState.players;
 
     if (!alivePlayers.includes(gameState.doctor)) {
-      await gameState.gameChannel.send(
-        "💉 **The doctor is not present. Moving to the next phase.**"
-      );
-      startBodyguardPhase(channel);
+      //await gameState.gameChannel.send(
+      //   "💉 **The doctor is not present. Moving to the next phase.**"
+      //);
+      gameState.doctorPhaseEnded = true;
+      saveGameState();
+      checkIfNightEnded();
       return;
     }
-
-    await gameState.gameChannel.send(
-      "💉 **Doctor, it is your turn to protect a player.**"
-    );
+    //await gameState.gameChannel.send(
+    //  "💉 **Doctor, it is your turn to protect a player.**"
+    //);
     const buttons = [];
     for (var i in alivePlayers) {
       var target = alivePlayers[i];
-      var targetObj = channel?.guild?.members.cache.get(target);
-      if (targetObj == null) {
-        targetObj = await client.users.fetch(target);
+      if (target != gameState.protectedPlayer) {
+        var targetObj = channel?.guild?.members.cache.get(target);
+        if (targetObj == null) {
+          targetObj = await client.users.fetch(target);
+        }
+        buttons.push(
+          new ButtonBuilder()
+            .setCustomId(`protect_${target}`)
+            .setLabel(`${targetObj.displayName || "Unknown"}`)
+            .setStyle(ButtonStyle.Primary)
+        );
       }
-      buttons.push(
-        new ButtonBuilder()
-          .setCustomId(`protect_${target}`)
-          .setLabel(`${targetObj.displayName || "Unknown"}`)
-          .setStyle(ButtonStyle.Primary)
-      );
     }
     const rows = createButtonRows(buttons);
     sendPlayerMessage(gameState.doctor, {
       content:
-        "💉 **You have been chosen as the doctor. You can protect any player, including yourself, from being killed.**",
+        "💉 **You have been chosen as the doctor. You can protect any player, including yourself, from being killed. You cannot pick the same player two nights in a row.**",
       components: rows,
     });
-
-    gameState.doctorTimeout = setTimeout(async () => {
-      if (
-        !gameState.doctorActionTaken &&
-        gameState.gameActive &&
-        !gameState.doctorPhaseEnded
-      ) {
-        await gameState.gameChannel.send(
-          `💉 **The doctor did not act in time. The doctor <@${gameState.doctor}> will be eliminated from the game.**`
-        );
-        sendPlayerMessage(
-          gameState.doctor,
-          "❌ **You did not choose anyone to protect.**"
-        );
-
-        gameState.players = gameState.players.filter(
-          (player) => player !== gameState.doctor
-        );
-        gameState.doctor = null;
-        gameState.doctorPhaseEnded = true;
-        startBodyguardPhase(channel);
-      }
-    }, config.docActionTime);
-
-    gameTimeouts.push(gameState.doctorTimeout);
   } catch (error) {
     console.error("Error in startDoctorPhase:", error);
     await gameState.gameChannel.send(
@@ -1229,22 +1611,21 @@ async function startDoctorPhase(channel) {
 async function startBodyguardPhase(channel) {
   try {
     if (!gameState.gameActive) return;
-    gameState.currentPhase = "bodyguard";
-    saveGameState();
     if (!gameState.players.includes(gameState.bodyguard)) {
-      await gameState.gameChannel.send(
-        "🛡️ **The bodyguard is not present so skipping.**"
-      );
-
-      startDetectorPhase(channel);
+      //  await gameState.gameChannel.send(
+      //      "🛡️ **The bodyguard is not present so skipping.**"
+      //  );
+      gameState.bodyguardPhaseEnded = true;
+      saveGameState();
+      checkIfNightEnded();
       return;
     }
 
     gameState.bodyguardPhaseEnded = false;
 
-    await gameState.gameChannel.send(
-      "🛡️ **Bodyguard, it is your turn to choose a player to protect. Keep in mind you will die for them if they are targeted by the mafia**"
-    );
+    // await gameState.gameChannel.send(
+    //  "🛡️ **Bodyguard, it is your turn to choose a player to protect. Keep in mind you will die for them if they are targeted by the mafia**"
+    //);
 
     const alivePlayers = gameState.players.filter(
       (player) => player !== gameState.bodyguard
@@ -1252,41 +1633,27 @@ async function startBodyguardPhase(channel) {
     const buttons = [];
     for (var i in alivePlayers) {
       var target = alivePlayers[i];
-      var targetObj = channel?.guild?.members.cache.get(target);
-      if (targetObj == null) {
-        targetObj = await client.users.fetch(target);
+      if (target != gameState.shieldedPlayer) {
+        var targetObj = channel?.guild?.members.cache.get(target);
+        if (targetObj == null) {
+          targetObj = await client.users.fetch(target);
+        }
+        buttons.push(
+          new ButtonBuilder()
+            .setCustomId(`shield_${target}`)
+            .setLabel(`${targetObj?.displayName || "Unknown"}`)
+            .setStyle(ButtonStyle.Primary)
+        );
       }
-      buttons.push(
-        new ButtonBuilder()
-          .setCustomId(`shield_${target}`)
-          .setLabel(`${targetObj?.displayName || "Unknown"}`)
-          .setStyle(ButtonStyle.Primary)
-      );
     }
-
     const rows = createButtonRows([...buttons]);
 
     sendPlayerMessage(gameState.bodyguard, {
       content:
-        "🛡️ **You are the bodyguard. You can protect any player but at great personal risk**",
+        "🛡️ **You are the bodyguard. You can protect any player except the player you picked last turn and sacrifice yourself instead of them.**",
       components: rows,
       ephemeral: true,
     });
-
-    const timeout = setTimeout(async () => {
-      if (gameState.gameActive && !gameState.bodyguardPhaseEnded) {
-        if (!gameState.bodyguardUsedAbility) {
-          sendPlayerMessage(
-            gameState.bodyguard,
-            "❌ **Time is up and you did not make a decision. You can give the shield in a future round.**"
-          );
-        }
-        gameState.bodyguardPhaseEnded = true;
-        startDetectorPhase(channel);
-      }
-    }, config.bodyguardPhaseTime);
-
-    gameTimeouts.push(timeout);
   } catch (error) {
     console.error("Error in startBodyguardPhase:", error);
     await channel.send("❌ **An error occurred during the bodyguard phase.**");
@@ -1314,12 +1681,13 @@ async function handleBodyguardShield(interaction) {
       components: [],
     });
 
-    await gameState.gameChannel.send(
-      `🛡️ **The bodyguard has chosen whomst to protect.**`
-    );
+    //await gameState.gameChannel.send(
+    //   `🛡️ **The bodyguard has chosen whomst to protect.**`
+    // );
 
     gameState.bodyguardPhaseEnded = true;
-    startDetectorPhase(gameState.gameChannel);
+    saveGameState();
+    checkIfNightEnded();
   } catch (error) {
     console.error("Error in handleBodyguardShield:", error);
     if (!interaction.replied && !interaction.deferred) {
@@ -1331,7 +1699,7 @@ async function handleBodyguardShield(interaction) {
     }
   }
 }
-
+/* 
 async function handleBodyguardSkip(interaction) {
   try {
     if (!gameState.gameActive || gameState.bodyguardPhaseEnded) return;
@@ -1355,7 +1723,7 @@ async function handleBodyguardSkip(interaction) {
     );
 
     gameState.bodyguardPhaseEnded = true;
-    startDetectorPhase(gameState.gameChannel);
+    startdetectivePhase(gameState.gameChannel);
   } catch (error) {
     console.error("Error in handleBodyguardSkip:", error);
     if (!interaction.replied && !interaction.deferred) {
@@ -1366,36 +1734,28 @@ async function handleBodyguardSkip(interaction) {
       });
     }
   }
-}
+} */
 
-async function startDetectorPhase(channel) {
+async function startdetectivePhase(channel) {
   try {
     if (!gameState.gameActive) return;
-    gameState.currentPhase = "detective";
-    saveGameState();
+
     if (
-      gameState.detectorUsedAbility ||
-      !gameState.players.includes(gameState.detector)
+      gameState.detectiveUsedAbility ||
+      !gameState.players.includes(gameState.detective)
     ) {
-      if (gameState.detectorUsedAbility) {
-        await gameState.gameChannel.send(
-          "🕵️ **The detective has already used their ability so skipping.**"
-        );
-      } else {
-        await gameState.gameChannel.send(
-          "🕵️ **The detective is not present so skipping.**"
-        );
-      }
-      resolveNightPhase(gameState.gameChannel);
+      gameState.detectivePhaseEnded = true;
+      saveGameState();
+      checkIfNightEnded();
       return;
     }
 
-    await channel.send(
-      "🕵️ **Detective, it is your turn to reveal a player's role.**"
-    );
+    // await channel.send(
+    //  "🕵️ **Detective, it is your turn to reveal a player's role.**"
+    // );
 
     const alivePlayers = gameState.players.filter(
-      (player) => player !== gameState.detector
+      (player) => player !== gameState.detective
     );
     const buttons = [];
     for (var i in alivePlayers) {
@@ -1419,37 +1779,23 @@ async function startDetectorPhase(channel) {
 
     const rows = createButtonRows([...buttons, skipButton]);
 
-    sendPlayerMessage(gameState.detector, {
+    sendPlayerMessage(gameState.detective, {
       content:
         "🕵️ **You have been chosen as the detective. You can reveal a player's role once in the game.**",
       components: rows,
       ephemeral: true,
     });
-
-    const timeout = setTimeout(async () => {
-      if (gameState.gameActive) {
-        if (!gameState.detectorUsedAbility) {
-          sendPlayerMessage(
-            gameState.detector,
-            "❌ **Time is up and you did not make a decision. You can detect in a future round.**"
-          );
-        }
-        resolveNightPhase(gameState.gameChannel);
-      }
-    }, config.detectorPhaseTime);
-
-    gameTimeouts.push(timeout);
   } catch (error) {
-    console.error("Error in startDetectorPhase:", error);
+    console.error("Error in startdetectivePhase:", error);
     await channel.send("❌ **An error occurred during the detective phase.**");
   }
 }
 
-async function handleDetectorDetect(interaction) {
+async function handledetectiveDetect(interaction) {
   try {
     if (!gameState.gameActive) return;
 
-    if (gameState.detectorUsedAbility) {
+    if (gameState.detectiveUsedAbility) {
       await interaction.reply({
         content: "❌ **You have already used your detection ability.**",
         ephemeral: true,
@@ -1467,26 +1813,18 @@ async function handleDetectorDetect(interaction) {
       return;
     }
 
-    gameState.detectorUsedAbility = true;
+    gameState.detectiveUsedAbility = true;
+    gameState.detectiveTarget = playerId;
 
-    const role = gameState.playerRoles.get(playerId) || "citizen";
+    //  await interaction.channel.send(
+    //    `🔍 **The detective has revealed <@${playerId}>'s role.**`
+    //   );
 
-    await interaction.update({
-      content: `🔍 **You have chosen to reveal <@${playerId}>'s role. Their role is: ${role.toUpperCase()}.**`,
-      components: [],
-    });
-
-    await interaction.channel.send(
-      `🔍 **The detective has revealed <@${playerId}>'s role.**`
-    );
-
-    const timeout = setTimeout(
-      () => resolveNightPhase(interaction.channel),
-      5000
-    );
-    gameTimeouts.push(timeout);
+    gameState.detectivePhaseEnded = true;
+    saveGameState();
+    checkIfNightEnded();
   } catch (error) {
-    console.error("Error in handleDetectorDetect:", error);
+    console.error("Error in handledetectiveDetect:", error);
     if (!interaction.replied && !interaction.deferred) {
       await interaction.reply({
         content:
@@ -1497,11 +1835,11 @@ async function handleDetectorDetect(interaction) {
   }
 }
 
-async function handleDetectorSkip(interaction) {
+async function handledetectiveSkip(interaction) {
   try {
     if (!gameState.gameActive) return;
 
-    if (gameState.detectorUsedAbility) {
+    if (gameState.detectiveUsedAbility) {
       await interaction.reply({
         content: "❌ **You have already used your detection ability.**",
         ephemeral: true,
@@ -1515,17 +1853,15 @@ async function handleDetectorSkip(interaction) {
       components: [],
     });
 
-    await interaction.channel.send(
-      `🔍 **The detective decided not to detect this round.**`
-    );
+    //  await interaction.channel.send(
+    //  `🔍 **The detective decided not to detect this round.**`
+    // );
 
-    const timeout = setTimeout(
-      () => resolveNightPhase(interaction.channel),
-      5000
-    );
-    gameTimeouts.push(timeout);
+    gameState.detectivePhaseEnded = true;
+    saveGameState();
+    checkIfNightEnded();
   } catch (error) {
-    console.error("Error in handleDetectorSkip:", error);
+    console.error("Error in handledetectiveSkip:", error);
     if (!interaction.replied && !interaction.deferred) {
       await interaction.reply({
         content:
@@ -1536,14 +1872,116 @@ async function handleDetectorSkip(interaction) {
   }
 }
 
+function checkIfNightEnded() {
+  if (
+    gameState.mafiaPhaseEnded &&
+    gameState.doctorPhaseEnded &&
+    gameState.bodyguardPhaseEnded &&
+    gameState.detectivePhaseEnded &&
+    gameState.citizenPhaseEnded
+  ) {
+    gameState.mafiaPhaseEnded = false;
+    gameState.doctorPhaseEnded = false;
+    gameState.bodyguardPhaseEnded = false;
+    gameState.detectivePhaseEnded = false;
+    gameState.citizenPhaseEnded = false;
+    resolveNightPhase();
+  }
+}
+async function GetPlayerName(playerId) {
+  var targetObj = gameState.gameChannel?.guild?.members?.cache.get(playerId);
+  if (targetObj == null || targetObj == undefined) {
+    targetObj = await client.users.fetch(playerId);
+    if (targetObj == null) {
+      targetObj = await guild?.members.fetch(playerId);
+    }
+  }
+
+  return targetObj?.displayName || targetObj?.globalName || "Unknown";
+}
+function vibeCompare(player1, player2) {
+  return (
+    vibeCheck(player1) === vibeCheck(player2) ||
+    vibeCheck(player1) === 4 ||
+    vibeCheck(player2) === 4
+  );
+}
+
+function vibeCheck(playerId) {
+  switch (gameState.playerRoles.get(playerId)) {
+    case "doctor":
+    case "citizen":
+    case "detective":
+    case "bodyguard":
+      return 1;
+    case "mafia":
+      return 2;
+    case "mayor":
+    case "president":
+      return 3;
+    case "clown":
+      return 4;
+  }
+}
+
 async function resolveNightPhase(channel) {
   try {
     if (!gameState.gameActive) return;
+    if (gameState.detectiveTarget != null) {
+      const role =
+        gameState.playerRoles.get(gameState.detectiveTarget) || "citizen";
 
+      sendPlayerMessage(
+        gameState.detective,
+        `🔍 **You have chosen to reveal <@${
+          gameState.detectiveTarget
+        }>'s role. Their role is: ${role.toUpperCase()}.**`
+      );
+      gameState.detectiveTarget = null;
+    }
+    for (var [player, action] of gameState.citizenActions) {
+      if (
+        !(
+          action == null ||
+          action.target1 == null ||
+          action.target2 == null ||
+          !gameState.players.includes(action.target1) ||
+          !gameState.players.includes(action.target2)
+        )
+      ) {
+        var vibeStatus =
+          "These players don't share the same vibes. The energy is terrible.";
+        if (vibeCompare(action.target1, action.target2)) {
+          vibeStatus =
+            "These players have good vibes. They are on the save wavelength";
+        }
+        var target1Name = await GetPlayerName(action.target1);
+        var target2Name = await GetPlayerName(action.target2);
+        const embed = new EmbedBuilder()
+          .setTitle("📈 ** Vibe Check Results**")
+          .setColor("#1E792C")
+          .addFields(
+            {
+              name: "You've checked the similarity of vibes on the following two players",
+              value: `${target1Name} and ${target2Name}`,
+              inline: true,
+            },
+            {
+              name: "Final Verdict:",
+              value: vibeStatus,
+            }
+          );
+        sendPlayerMessage(player, { embeds: embed });
+        gameState.citizensUsedAbility =
+          gameState.citizensUsedAbility.push(player);
+      }
+    }
+    gameState.citizenActions = null;
     var killedPlayer = gameState.killedPlayer;
     const protectedPlayer = gameState.protectedPlayer;
-
+    var savedPlayer = null;
     if (gameState.shieldedPlayer == killedPlayer) {
+      savedPlayer = killedPlayer;
       killedPlayer = gameState.bodyguard;
     }
     if (killedPlayer && killedPlayer !== protectedPlayer) {
@@ -1562,8 +2000,8 @@ async function resolveNightPhase(channel) {
         gameState.doctor = null;
         role = "doctor";
       }
-      if (killedPlayer === gameState.detector) {
-        gameState.detector = null;
+      if (killedPlayer === gameState.detective) {
+        gameState.detective = null;
         role = "detective";
       }
       if (killedPlayer === gameState.bodyguard) {
@@ -1618,7 +2056,12 @@ async function resolveNightPhase(channel) {
         "by someone dressed up as Robocop.",
       ];
       const murderMethod = murderMethods.sort(() => Math.random() - 0.5)[0];
-
+      if (savedPlayer != null) {
+        sendPlayerMessage(
+          savedPlayer,
+          "You heard fighting in the night in front of your house. The bodyguard successfully protected you"
+        );
+      }
       await gameState.gameChannel.send(
         `💀 **<@${killedPlayer}> was killed by the mafia tonight. They were killed ${murderMethod}**`
       );
@@ -1637,12 +2080,11 @@ async function resolveNightPhase(channel) {
     }
 
     if (gameState.gameActive) {
-      const timeout = setTimeout(() => startVotePhase(channel), 3000);
-      gameTimeouts.push(timeout);
+      setTimeout(() => startVotePhase(channel), 3000);
     }
   } catch (error) {
     console.error("Error in resolveNightPhase:", error);
-    await channel.send(
+    await gameState.gameChannel.send(
       "❌ **An error occurred while ending the night phase.**"
     );
   }
@@ -1662,7 +2104,11 @@ function checkWinConditions(channel) {
 
     if (mafiaCount === 0) {
       winner = "🎉 **The citizens win!**";
-    } else if (mafiaCount >= citizenCount) {
+    } else if (
+      mafiaCount >= citizenCount &&
+      !(gameState.president != null && !gameState.presidentUsedAbility) &&
+      gameState.mayor == null
+    ) {
       winner = "💀 **The mafia wins!**";
     }
 
@@ -1733,15 +2179,10 @@ function getAlivePlayers() {
 async function startVotePhase(channel) {
   try {
     if (!gameState.gameActive || gameState.votePhaseActive) return;
-    gameState.currentPhase = "voting";
+    gameState.currentPhase = "day";
     saveGameState();
 
     gameState.votePhaseActive = true;
-
-    if (gameState.voteTimeout) {
-      clearTimeout(gameState.voteTimeout);
-      gameState.voteTimeout = null;
-    }
 
     const alivePlayers = [...gameState.players];
     alivePlayers.sort(() => Math.random() - 0.5);
@@ -1808,7 +2249,7 @@ async function startVotePhase(channel) {
     } else {
       controlButtonsRow = new ActionRowBuilder().addComponents(skipButton);
     }
-    await disableButtonsInChannel(channel);
+    await disableButtonsInChannel(gameState.gameChannel);
     var playersWhoNeedToVote = [...gameState.players];
 
     for (var [key, value] of gameState.votes) {
@@ -1828,9 +2269,9 @@ async function startVotePhase(channel) {
     );
 
     gameState.voteEmbed = new EmbedBuilder()
-      .setTitle("🔥 **MURDER ELECTION!** 🔥")
+      .setTitle("🔥🌞🔥 **MURDER ELECTION!** 🔥🌞🔥")
       .setDescription(
-        "🗳️ **It is time to vote! Choose who you think is the mafia or choose to skip voting.**"
+        "🗳️ **It's daytime again! Choose who you think is the mafia or choose to skip voting.**"
       )
       .setColor("#FF4500")
       .setThumbnail(client.user.displayAvatarURL())
@@ -1847,10 +2288,7 @@ async function startVotePhase(channel) {
       components: [...votingButtonRows, controlButtonsRow],
     });
 
-    gameState.voteTimeout = setTimeout(
-      () => tallyVotes(channel),
-      config.citizenVoteTime
-    );
+    setTimeout(() => tallyVotes(channel), config.citizenVoteTime);
   } catch (error) {
     console.error("Error in startVotePhase:", error);
     await channel.send("❌ **An error occurred during the voting phase.**");
@@ -1947,9 +2385,7 @@ async function handleVote(interaction) {
             row.components.map(async (button) => {
               const targetPlayerId = button.customId.split("_")[1];
               if (button.customId === "skip_vote") {
-                return ButtonBuilder.from(button).setLabel(
-                  `Skip Vote (${gameState.skipVotes})`
-                );
+                return ButtonBuilder.from(button).setLabel(`Skip Vote`);
               }
               if (
                 gameState.hasPresident &&
@@ -1970,7 +2406,7 @@ async function handleVote(interaction) {
               return ButtonBuilder.from(button).setLabel(
                 `${
                   targetObj?.displayName || targetObj?.globalName || "Unknown"
-                } (${voteCount})`
+                } `
               );
             })
           )
@@ -2070,9 +2506,7 @@ async function handleSkipVote(interaction) {
             row.components.map(async (button) => {
               const targetPlayerId = button.customId.split("_")[1];
               if (button.customId === "skip_vote") {
-                return ButtonBuilder.from(button).setLabel(
-                  `Skip Vote (${gameState.skipVotes})`
-                );
+                return ButtonBuilder.from(button).setLabel(`Skip Vote `);
               }
               if (
                 gameState.hasPresident &&
@@ -2093,7 +2527,7 @@ async function handleSkipVote(interaction) {
               return ButtonBuilder.from(button).setLabel(
                 `${
                   targetObj?.displayName || targetObj?.globalName || "Unknown"
-                } (${voteCount})`
+                }`
               );
             })
           )
@@ -2313,6 +2747,22 @@ async function tallyVotes(channel) {
       );
     } else if (playersWithMaxVotes.length === 1) {
       const expelledPlayer = playersWithMaxVotes[0];
+      var whoVotedForThem = [];
+      for (var [key, value] of gameState.votes) {
+        if (value.target == expelledPlayer) {
+          var targetObj = gameState.gameChannel?.guild?.members?.cache.get(key);
+          if (targetObj == null || targetObj == undefined) {
+            targetObj = await client.users.fetch(target);
+            if (targetObj == null) {
+              targetObj = await guild?.members.fetch(target);
+            }
+          }
+          whoVotedForThem.push(
+            targetObj?.displayName || targetObj?.globalName || "Unknown"
+          );
+        }
+      }
+
       gameState.players = gameState.players.filter(
         (player) => player !== expelledPlayer
       );
@@ -2321,7 +2771,7 @@ async function tallyVotes(channel) {
       const role = gameState.playerRoles.get(expelledPlayer);
       if (role === "mafia") {
         alignmentNotification =
-          "They were in-fact an evil mafia and the town is a safer place now.";
+          "They were an evil mafia and the town is a safer place now.";
 
         gameState.mafias = gameState.mafias.filter(
           (mafia) => mafia !== expelledPlayer
@@ -2330,8 +2780,8 @@ async function tallyVotes(channel) {
       if (expelledPlayer === gameState.doctor) {
         gameState.doctor = null;
       }
-      if (expelledPlayer === gameState.detector) {
-        gameState.detector = null;
+      if (expelledPlayer === gameState.detective) {
+        gameState.detective = null;
       }
       if (expelledPlayer === gameState.bodyguard) {
         gameState.bodyguard = null;
@@ -2386,6 +2836,8 @@ async function tallyVotes(channel) {
       await channel.send(
         `🚫 **<@${expelledPlayer}> was voted out and ${wayToDie} ${alignmentNotification}**`
       );
+      await channel.send(`😈 ** The following players voted for them ** 👿`);
+      await channel.send(` ${whoVotedForThem.join(", ")}`);
       await sendPlayerToHell(expelledPlayer);
     } else {
       await channel.send(
@@ -2426,7 +2878,7 @@ async function disableButtonsInChannel(channel) {
 function proceedToNextPhase(channel) {
   if (!gameState.gameActive) return;
 
-  const timeout = setTimeout(() => startMafiaPhase(channel), 3000);
+  const timeout = setTimeout(() => startNightPhase(channel), 3000);
   gameTimeouts.push(timeout);
 }
 
