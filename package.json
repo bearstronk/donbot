@@ -3,7 +3,7 @@
   "version": "1.2.0",
   "main": "index.js",
   "scripts": {
-    "start": "forever start index.js"
+    "start": "forever start .src/index.js"
   },
   "keywords": [],
   "author": {
